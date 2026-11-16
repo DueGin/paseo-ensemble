@@ -4,6 +4,8 @@ import type { Team } from "../shared/team";
 
 const team: Team = {
   version: 1,
+  mode: "delegation",
+  candidates: [],
   goal: "",
   orchestrator: { workspace: "orchestrator", provider: "claude", model: "claude-opus-5-5" },
   roles: [{ name: "design", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" }],

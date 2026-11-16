@@ -26,6 +26,11 @@ describe("teamAgentsToArchive", () => {
     expect(teamAgentsToArchive(agents, ["wks_lead", "wks_design"], ["qa", "design"])).toEqual(["orch", "shared-role", "own-role"]);
   });
 
+  it("archives members the plugin started, including helpers that no role of the file names", () => {
+    const members = [agent("helper", "wks_lead", { role: "helper", [LABEL]: "member" }), agent("elsewhere", "wks_other", { role: "helper", [LABEL]: "member" })];
+    expect(teamAgentsToArchive(members, ["wks_lead"], ["qa"])).toEqual(["helper"]);
+  });
+
   it("matches the role label case-insensitively", () => {
     const labelled = [agent("lower", "wks_lead", { role: "ui" }), agent("upper", "wks_lead", { role: "UI" })];
     expect(teamAgentsToArchive(labelled, ["wks_lead"], ["UI"])).toEqual(["lower", "upper"]);
@@ -55,6 +60,8 @@ describe("teamAgentsToArchive", () => {
 
 const team = (workspace: string): Team => ({
   version: 1,
+  mode: "delegation",
+  candidates: [],
   goal: "",
   orchestrator: { workspace, provider: "claude", model: "m" },
   roles: [{ name: "qa", provider: "claude", model: "m", folders: [], instructions: "" }],

@@ -10,6 +10,8 @@ const catalog: ProviderInfo[] = [
 
 const proposal = {
   version: 1,
+  mode: "delegation",
+  candidates: [],
   goal: "2D platformer game",
   orchestrator: { workspace: "orchestrator", provider: "claude", model: "claude-opus-5-5" },
   roles: [{ name: "design", provider: "codex", model: "gpt-6.1-sol", folders: ["src/ui"], instructions: "UI" }],
@@ -28,7 +30,7 @@ describe("plannerPrompt", () => {
   it("shows the exact JSON shape with every key the team file needs", () => {
     const start = prompt.indexOf("{");
     const example = JSON.parse(prompt.slice(start, prompt.lastIndexOf("}") + 1));
-    expect(Object.keys(example)).toEqual(["version", "goal", "orchestrator", "roles"]);
+    expect(Object.keys(example)).toEqual(["version", "goal", "mode", "orchestrator", "roles", "candidates"]);
     expect(Object.keys(example.orchestrator)).toEqual(["workspace", "provider", "model"]);
     expect(Object.keys(example.roles[0])).toEqual(["name", "provider", "model", "folders", "instructions"]);
   });
@@ -52,7 +54,7 @@ describe("plannerPrompt", () => {
 
 describe("TEAM_JSON_SCHEMA", () => {
   it("requires the fields the team file needs", () => {
-    expect(TEAM_JSON_SCHEMA.required).toEqual(["version", "goal", "orchestrator", "roles"]);
+    expect(TEAM_JSON_SCHEMA.required).toEqual(["version", "goal", "mode", "orchestrator", "roles", "candidates"]);
   });
 
   it("has no workspace property on a role", () => {

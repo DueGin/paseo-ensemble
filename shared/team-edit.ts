@@ -19,6 +19,8 @@ export function summarizeTeamEdit(draft: Team, edited: Team): {
   changed: { name: string; fields: ("provider" | "model" | "folders" | "instructions")[] }[];
   orchestrator: boolean;
   goal: boolean;
+  mode: boolean;
+  candidates: boolean;
 } {
   const before = new Map(draft.roles.map((role) => [role.name.trim(), role]));
   const after = new Map(edited.roles.map((role) => [role.name.trim(), role]));
@@ -41,5 +43,7 @@ export function summarizeTeamEdit(draft: Team, edited: Team): {
     changed,
     orchestrator: draft.orchestrator.provider !== edited.orchestrator.provider || draft.orchestrator.model !== edited.orchestrator.model,
     goal: draft.goal !== edited.goal,
+    mode: draft.mode !== edited.mode,
+    candidates: JSON.stringify(draft.candidates) !== JSON.stringify(edited.candidates),
   };
 }

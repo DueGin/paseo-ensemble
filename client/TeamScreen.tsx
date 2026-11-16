@@ -8,6 +8,7 @@ import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-nati
 import { withAlpha } from "../shared/color";
 import { messages } from "./i18n";
 import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
+import { PresetsSection, StartFromPresetDialog, usePresets } from "./Presets";
 import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
 
 export const SCREEN_ID = "team";
@@ -29,7 +30,7 @@ export function TeamSidebarItem({ currentScreen, openScreen }: PluginSidebarItem
 /** Browse every project's agent teams, open an existing team's panel, or create a new team. */
 export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginScreenProps & { openTeamPanel?: (workspaceId: string) => void }) {
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
-  const { t } = useTranslation(messages);
+  const { t, locale } = useTranslation(messages);
   const projects = useProjectTeams();
   const [listWidth, setListWidth] = useState(0);
   const columns = layout.compact || listWidth < 720 ? 1 : listWidth < 1120 ? 2 : 3;
@@ -80,7 +81,7 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
     navigation?.openWorkspace({ workspaceId: result.workspaces[0]!.id });
   };
   const restored = useMutation({
-    mutationFn: (input: { projectId: string; file: string }) => restore(input),
+    mutationFn: (input: { projectId: string; file: string }) => restore({ ...input, locale }),
     onSuccess: (result) => {
       if (!result.ok) return;
       setReconnecting(null);
@@ -89,6 +90,9 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
     },
   });
   const reconnectBusy = reconnected.isPending || restored.isPending;
+  const presetSettings = usePresets();
+  const presets = presetSettings.status === "ready" ? presetSettings.values.presets : [];
+  const [startingFor, setStartingFor] = useState<string | null>(null);
 
   if (projectId) {
     return (
@@ -110,6 +114,20 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
       <Text style={s.title}>{t("screen.title")}</Text>
+      <PresetsSection s={s} colors={theme.colors} />
+      <StartFromPresetDialog
+        s={s}
+        colors={theme.colors}
+        project={projects.data?.find((project) => project.id === startingFor) ?? null}
+        presets={presets}
+        onClose={() => setStartingFor(null)}
+        onStarted={(result) => {
+          setStartingFor(null);
+          invalidateTeams();
+          if (navigation) navigation.openAgent({ agentId: result.orchestratorAgentId });
+          else openTeamPanel?.(result.workspaceId);
+        }}
+      />
       {projects.isLoading ? <Text style={s.muted}>{t("loading")}</Text> : null}
       {projects.error ? <Text style={s.danger}>{String(projects.error)}</Text> : null}
       <View style={{ gap: 12 }} onLayout={(event) => {
@@ -128,9 +146,16 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
               <Text style={[s.text, { fontSize: 17, fontWeight: "700" }]}>{project.name}</Text>
               <Text style={[s.muted, { fontSize: 11 }]} numberOfLines={1}>{project.root}</Text>
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel={t("screen.newTeam")} onPress={() => setProjectId(project.id)}>
-              <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>{`+ ${t("screen.newTeam")}`}</Text>
-            </Pressable>
+            <View style={{ alignItems: "flex-end", gap: 6 }}>
+              <Pressable accessibilityRole="button" accessibilityLabel={t("screen.newTeam")} onPress={() => setProjectId(project.id)}>
+                <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>{`+ ${t("screen.newTeam")}`}</Text>
+              </Pressable>
+              {presets.length ? (
+                <Pressable accessibilityRole="button" accessibilityLabel={t("presets.start")} onPress={() => setStartingFor(project.id)}>
+                  <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>{`▶ ${t("presets.start")}`}</Text>
+                </Pressable>
+              ) : null}
+            </View>
           </View>
           <View style={{ padding: 10, gap: 8 }}>
           {project.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
@@ -139,7 +164,7 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
             <View key={team.file} style={[s.card, { minWidth: 0, maxWidth: "100%", padding: 8, gap: 4, backgroundColor: theme.colors.surface2, borderLeftWidth: 3, borderLeftColor: team.workspaceId ? theme.colors.accent : theme.colors.statusWarning }]}>
               <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
                 <Text style={[s.text, { flex: 1, minWidth: 0, fontSize: 14, fontWeight: "700" }]}>{team.orchestratorWorkspace}</Text>
-                <Text style={s.muted}>{t("screen.roles", { count: team.roles })}</Text>
+                <Text style={s.muted}>{t("screen.roles", { count: team.roles })}{team.candidates ? ` · ${t("screen.candidates", { count: team.candidates })}` : ""} · {t(`mode.${team.mode}`)}</Text>
               </View>
               {team.goal ? <Text style={s.muted} numberOfLines={2}>{team.goal}</Text> : null}
               {!team.workspaceId ? (

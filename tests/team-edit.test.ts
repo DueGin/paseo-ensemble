@@ -13,6 +13,8 @@ const catalog: ProviderInfo[] = [
 
 const draft: Team = {
   version: 1,
+  mode: "delegation",
+  candidates: [],
   goal: "Ship the web app",
   orchestrator: { workspace: "lead", provider: "claude", model: "claude-sonnet-5-5" },
   roles: [
@@ -49,10 +51,12 @@ describe("applyTeamEdit", () => {
 
 describe("summarizeTeamEdit", () => {
   it("reports nothing for an identical team, and nothing for folder order alone", () => {
-    const empty = { added: [], removed: [], changed: [], orchestrator: false, goal: false };
+    const empty = { added: [], removed: [], changed: [], orchestrator: false, goal: false, mode: false, candidates: false };
     expect(summarizeTeamEdit(draft, draft)).toEqual(empty);
     const reordered = edited({ roles: [{ ...draft.roles[0]!, folders: ["packages/ui", "apps/web"] }, draft.roles[1]!] });
     expect(summarizeTeamEdit(draft, reordered)).toEqual(empty);
+    expect(summarizeTeamEdit(draft, edited({ mode: "team" })).mode).toBe(true);
+    expect(summarizeTeamEdit(draft, edited({ candidates: [{ name: "opus", provider: "claude", model: "m", notes: "" }] })).candidates).toBe(true);
   });
 
   it("lists an added role", () => {
@@ -123,7 +127,7 @@ describe("teamEditPrompt", () => {
     expect(prompt).toMatch(/Do not create, change or delete any file/);
     const example = JSON.parse(prompt.slice(prompt.lastIndexOf('{\n  "version"'), prompt.lastIndexOf("}") + 1));
     expect(example.orchestrator.workspace).toBe("lead");
-    expect(Object.keys(example)).toEqual(["version", "goal", "orchestrator", "roles"]);
+    expect(Object.keys(example)).toEqual(["version", "goal", "mode", "orchestrator", "roles", "candidates"]);
   });
 });
 

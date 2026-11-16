@@ -77,5 +77,6 @@ function check(target: string, provider: string, model: string, catalog: readonl
 export function validateTeam(team: Team, catalog: readonly ProviderInfo[]): TeamError[] {
   const errors = [check("orchestrator", team.orchestrator.provider, team.orchestrator.model, catalog)];
   for (const role of team.roles) errors.push(check(role.name, role.provider, role.model, catalog));
+  for (const candidate of team.candidates) errors.push(check(`candidate ${candidate.name}`, candidate.provider, candidate.model, catalog));
   return errors.filter((error): error is TeamError => error !== null);
 }

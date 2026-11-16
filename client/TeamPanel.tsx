@@ -1,16 +1,18 @@
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { usePaseo, useRpc, useSettings, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { withFreeWorkspaces } from "../shared/apply-plan";
-import { foldersText, newRole, parseFolders } from "../shared/draft";
+import { foldersText, newCandidate, newRole, parseFolders } from "../shared/draft";
 import { EMPTY_HISTORY, record, undo, redo, type DraftHistory } from "../shared/draft-history";
 import { messages } from "./i18n";
 import { teamApplyRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamRestartOrchestratorRpc, teamEditProposalRpc, teamEditProposeRpc } from "../shared/rpc";
-import { checkTeam, type Role, type Team } from "../shared/team";
+import { languageFromLocale, PROMPT_LANGUAGES, TEAM_MODES, type PromptLanguage, type TeamMode } from "../shared/modes";
+import { newPresetId, presetsSettings, presetToTeam, teamToPreset } from "../shared/presets";
+import { candidateHandle, checkTeam, type Candidate, type Role, type Team } from "../shared/team";
 import { applyTeamEdit, summarizeTeamEdit } from "../shared/team-edit";
 import { providerIcon } from "../shared/provider-icons";
 import { TEAMS_DIR, workspaceClashes } from "../shared/team-files";
@@ -90,8 +92,150 @@ function Select({ s, label, options, value, onChange }: { s: Styles; label: stri
   );
 }
 
+/** Hosts the searchable picker that Select opens, for everything rendered inside it. */
+export function SelectHost({ s, children }: { s: Styles; children: ReactNode }) {
+  const { t } = useTranslation(messages);
+  const [picker, setPicker] = useState<SelectRequest | null>(null);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const pickerRef = useRef<SelectRequest | null>(null);
+  pickerRef.current = picker;
+  const listRef = useRef<ScrollView>(null);
+  const rowLayouts = useRef<Record<number, { y: number; height: number }>>({});
+  const listHeight = useRef(0);
+  const scrollY = useRef(0);
+  const openSelect = (request: SelectRequest) => {
+    setPickerQuery("");
+    const index = request.options.indexOf(request.value);
+    setHighlight(index >= 0 ? index : 0);
+    rowLayouts.current = {};
+    scrollY.current = 0;
+    setPicker(request);
+  };
+  const pickerNeedle = pickerQuery.trim().toLowerCase();
+  const pickerOptions = picker ? (pickerNeedle ? picker.options.filter((option) => option.toLowerCase().includes(pickerNeedle)) : picker.options) : [];
+  const highlightedIndex = pickerOptions.length > 0 ? Math.min(highlight, pickerOptions.length - 1) : -1;
+  const pickOption = (option: string) => {
+    const active = pickerRef.current;
+    if (!active) return;
+    pickerRef.current = null;
+    setPicker(null);
+    setPickerQuery("");
+    active.onChange(option);
+  };
+  const pickHighlighted = () => {
+    if (highlightedIndex >= 0 && highlightedIndex < pickerOptions.length) {
+      pickOption(pickerOptions[highlightedIndex]!);
+    }
+  };
+  useEffect(() => {
+    if (!picker || highlightedIndex < 0) return;
+    const row = rowLayouts.current[highlightedIndex] ?? { y: highlightedIndex * 40, height: 36 };
+    const viewHeight = listHeight.current || 320;
+    const top = scrollY.current;
+    if (row.y < top) {
+      scrollY.current = row.y;
+      listRef.current?.scrollTo({ y: row.y, animated: false });
+    } else if (row.y + row.height > top + viewHeight) {
+      const nextY = row.y + row.height - viewHeight;
+      scrollY.current = nextY;
+      listRef.current?.scrollTo({ y: nextY, animated: false });
+    }
+  }, [highlightedIndex, picker, pickerQuery]);
+  return (
+    <SelectContext.Provider value={openSelect}>
+      {children}
+      <Modal
+        title={picker?.label ?? ""}
+        open={picker !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            pickerRef.current = null;
+            setPicker(null);
+            setPickerQuery("");
+          }
+        }}
+      >
+        <Modal.Content>
+          {picker ? (
+            <>
+              <TextInput
+                style={s.input}
+                value={pickerQuery}
+                placeholder={t("role.searchPlaceholder")}
+                autoFocus
+                onChangeText={(text) => {
+                  rowLayouts.current = {};
+                  scrollY.current = 0;
+                  setPickerQuery(text);
+                  setHighlight(0);
+                }}
+                onKeyPress={(event) => {
+                  const key = event.nativeEvent.key;
+                  if (key === "ArrowDown") {
+                    event.preventDefault?.();
+                    if (pickerOptions.length > 0) {
+                      setHighlight((current) => Math.min(pickerOptions.length - 1, Math.min(current, pickerOptions.length - 1) + 1));
+                    }
+                  } else if (key === "ArrowUp") {
+                    event.preventDefault?.();
+                    if (pickerOptions.length > 0) {
+                      setHighlight((current) => Math.max(0, Math.min(current, pickerOptions.length - 1) - 1));
+                    }
+                  } else if (key === "Enter") {
+                    event.preventDefault?.();
+                    pickHighlighted();
+                  }
+                }}
+                onSubmitEditing={pickHighlighted}
+              />
+              <ScrollView
+                ref={listRef}
+                style={{ maxHeight: 320 }}
+                contentContainerStyle={{ gap: 4 }}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                scrollEventThrottle={16}
+                onLayout={(event) => {
+                  listHeight.current = event.nativeEvent.layout.height;
+                }}
+                onScroll={(event) => {
+                  scrollY.current = event.nativeEvent.contentOffset.y;
+                }}
+              >
+                {pickerOptions.length === 0 ? <Text style={s.muted}>{t(picker.options.length === 0 ? "role.noOptions" : "role.noMatches")}</Text> : null}
+                {pickerOptions.map((option, index) => {
+                  const selected = option === picker.value;
+                  const focused = index === highlightedIndex;
+                  return (
+                    <Pressable
+                      key={option}
+                      accessibilityRole="button"
+                      accessibilityLabel={option}
+                      accessibilityState={{ selected }}
+                      onLayout={(event) => {
+                        const { y, height } = event.nativeEvent.layout;
+                        rowLayouts.current[index] = { y, height };
+                      }}
+                      onPress={() => pickOption(option)}
+                      style={selected ? (focused ? s.optionOnActive : s.optionOn) : focused ? s.optionActive : s.option}
+                    >
+                      <Text style={selected ? s.buttonText : s.text}>{option}</Text>
+                      {selected ? <Text style={s.buttonText}>✓</Text> : null}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </>
+          ) : null}
+        </Modal.Content>
+      </Modal>
+    </SelectContext.Provider>
+  );
+}
+
 /** Provider and model pickers limited to what this host can run. */
-function ModelPicker({ s, catalog, provider, model, onChange }: { s: Styles; catalog: readonly ProviderInfo[]; provider: string; model: string; onChange(next: { provider: string; model: string }): void }) {
+export function ModelPicker({ s, catalog, provider, model, onChange }: { s: Styles; catalog: readonly ProviderInfo[]; provider: string; model: string; onChange(next: { provider: string; model: string }): void }) {
   const { t } = useTranslation(messages);
   const ready = catalog.filter((entry) => entry.ready);
   const models = ready.find((entry) => entry.id === provider)?.models.map((entry) => entry.id) ?? [];
@@ -108,6 +252,85 @@ function ModelPicker({ s, catalog, provider, model, onChange }: { s: Styles; cat
         }}
       />
       <Select s={s} label={t("role.model")} options={models} value={model} onChange={(next) => onChange({ provider, model: next })} />
+    </View>
+  );
+}
+
+/** The team's collaboration mode: fixed team or delegation, or auto to let the orchestrator pick per request. */
+export function ModePicker({ s, colors, mode, onChange }: { s: Styles; colors: Colors; mode: TeamMode; onChange?(mode: TeamMode): void }) {
+  const { t } = useTranslation(messages);
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={s.row}>
+        <Text style={s.muted}>{t("mode.label")}</Text>
+        {TEAM_MODES.map((option) => {
+          const selected = option === mode;
+          return (
+            <Pressable
+              key={option}
+              accessibilityRole="button"
+              accessibilityLabel={`${t("mode.label")}: ${t(`mode.${option}`)}`}
+              accessibilityState={{ selected }}
+              disabled={!onChange}
+              onPress={() => onChange?.(option)}
+              style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: selected ? colors.accent : colors.border, backgroundColor: selected ? colors.accent : colors.surface0, opacity: !onChange && !selected ? 0.6 : 1 }}
+            >
+              <Text style={{ color: selected ? colors.accentForeground : colors.foreground, fontWeight: selected ? "700" : "500", fontSize: 12 }}>{t(`mode.${option}`)}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={s.muted}>{t(`mode.${mode}Hint`)}</Text>
+    </View>
+  );
+}
+
+const LANGUAGE_NAMES: Record<PromptLanguage, string> = { zh: "中文", en: "English" };
+
+/** The agents' language: their instructions, replies and board posts. Unset means the app's language. */
+export function LanguagePicker({ s, colors, language, onChange }: { s: Styles; colors: Colors; language: PromptLanguage | undefined; onChange?(language: PromptLanguage): void }) {
+  const { t, locale } = useTranslation(messages);
+  const current = language ?? languageFromLocale(locale);
+  return (
+    <View style={{ gap: 6 }}>
+      <View style={s.row}>
+        <Text style={s.muted}>{t("review.language")}</Text>
+        {PROMPT_LANGUAGES.map((option) => {
+          const selected = option === current;
+          return (
+            <Pressable
+              key={option}
+              accessibilityRole="button"
+              accessibilityLabel={`${t("review.language")}: ${LANGUAGE_NAMES[option]}`}
+              accessibilityState={{ selected }}
+              disabled={!onChange}
+              onPress={() => onChange?.(option)}
+              style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: selected ? colors.accent : colors.border, backgroundColor: selected ? colors.accent : colors.surface0, opacity: !onChange && !selected ? 0.6 : 1 }}
+            >
+              <Text style={{ color: selected ? colors.accentForeground : colors.foreground, fontWeight: selected ? "700" : "500", fontSize: 12 }}>{LANGUAGE_NAMES[option]}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {onChange ? <Text style={s.muted}>{t("review.languageHint")}</Text> : null}
+    </View>
+  );
+}
+
+/** One model of the preset pool: an optional handle (derived from the model when empty) and a description of what it is good at and must not do. */
+export function CandidateEditor({ s, candidate, catalog, onChange, onRemove }: { s: Styles; candidate: Candidate; catalog: readonly ProviderInfo[]; onChange(candidate: Candidate): void; onRemove(): void }) {
+  const { t } = useTranslation(messages);
+  return (
+    <View style={[s.card, s.roleCard]}>
+      <ModelPicker s={s} catalog={catalog} provider={candidate.provider} model={candidate.model} onChange={(next) => onChange({ ...candidate, ...next })} />
+      <View style={{ gap: 4 }}>
+        <Text style={s.muted}>{t("candidates.notesLabel")}</Text>
+        <TextInput style={[s.input, { minHeight: 84, textAlignVertical: "top" }]} value={candidate.notes} placeholder={t("candidates.notes")} multiline onChangeText={(notes) => onChange({ ...candidate, notes })} />
+      </View>
+      <View style={s.row}>
+        <TextInput style={[s.input, { flex: 1, minWidth: 0 }]} value={candidate.name} placeholder={t("candidates.name", { handle: candidateHandle(candidate.model) })} onChangeText={(name) => onChange({ ...candidate, name })} />
+        <Button s={s} secondary label={t("candidates.remove")} onPress={onRemove} />
+      </View>
     </View>
   );
 }
@@ -198,7 +421,7 @@ function InstructionsDialog({
   onSave(instructions: string): void;
   onClose(): void;
 }) {
-  const { t } = useTranslation(messages);
+  const { t, locale } = useTranslation(messages);
   const improve = useRpc(teamInstructionsImproveRpc);
   const instructionsProposal = useRpc(teamInstructionsProposalRpc);
   const open = role !== null && team !== null;
@@ -255,6 +478,7 @@ function InstructionsDialog({
         ...target,
         role: { name: currentRole.name, folders: currentRole.folders, instructions: currentInstructions },
         request: currentRequest,
+        locale: currentTeam.language ?? locale,
         team: {
           goal: currentTeam.goal,
           orchestratorWorkspace: currentTeam.orchestrator.workspace,
@@ -361,7 +585,7 @@ function InstructionsDialog({
   );
 }
 
-function TeamModel({ provider, model, colors, icons }: { provider: string; model: string; colors: Colors; icons: Map<string, string | undefined> }) {
+export function TeamModel({ provider, model, colors, icons }: { provider: string; model: string; colors: Colors; icons: Map<string, string | undefined> }) {
   const icon = providerIcon(provider, icons.get(provider));
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0, flexShrink: 1 }}>
@@ -424,7 +648,7 @@ export function TeamPanel({ workspaceId, ...props }: PluginWorkspacePanelProps) 
 /** Propose, review and apply a team for the target's project. */
 export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pick<PluginScreenProps, "theme" | "layout" | "navigation"> & { target: Target; onApplied?(result: Applied): void }) {
   const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
-  const { t } = useTranslation(messages);
+  const { t, locale } = useTranslation(messages);
   const queryClient = useQueryClient();
   const paseo = usePaseo();
   const providers = useQuery({ queryKey: ["dashboard", "providers"], queryFn: () => paseo.providers.snapshot() });
@@ -455,24 +679,11 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   };
   const [editingRoleIndex, setEditingRoleIndex] = useState<number | null>(null);
   const [roleGroupWidth, setRoleGroupWidth] = useState(0);
+  const presetSettings = useSettings(presetsSettings);
+  const presets = presetSettings.status === "ready" ? presetSettings.values.presets : [];
+  const [presetName, setPresetName] = useState("");
+  const [savedPreset, setSavedPreset] = useState<string | null>(null);
   const [confirmRestart, setConfirmRestart] = useState(false);
-  const [picker, setPicker] = useState<SelectRequest | null>(null);
-  const [pickerQuery, setPickerQuery] = useState("");
-  const [highlight, setHighlight] = useState(0);
-  const pickerRef = useRef<SelectRequest | null>(null);
-  pickerRef.current = picker;
-  const listRef = useRef<ScrollView>(null);
-  const rowLayouts = useRef<Record<number, { y: number; height: number }>>({});
-  const listHeight = useRef(0);
-  const scrollY = useRef(0);
-  const openSelect = (request: SelectRequest) => {
-    setPickerQuery("");
-    const index = request.options.indexOf(request.value);
-    setHighlight(index >= 0 ? index : 0);
-    rowLayouts.current = {};
-    scrollY.current = 0;
-    setPicker(request);
-  };
 
   // The planner keeps running when this screen closes; reopening it picks the newest proposal back up.
   // Fetched fresh on every open (gcTime 0) and only once the team is read, since a proposal is fitted to it.
@@ -495,7 +706,8 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   const atHere = (team: Team): Team => (here === null ? team : { ...team, orchestrator: { ...team.orchestrator, workspace: here } });
   // A new draft creates new workspaces instead of landing in the project's existing ones.
   const titles = current.data?.projectWorkspaces ?? [];
-  const fresh = (team: Team): Team => withFreeWorkspaces(atHere(team), titles, { orchestrator: here === null });
+  // A new draft gets the app's language unless it names one; the review shows it and can switch it.
+  const fresh = (team: Team): Team => withFreeWorkspaces(atHere({ ...team, language: team.language ?? languageFromLocale(locale) }), titles, { orchestrator: here === null });
   useEffect(() => {
     if (planning.data?.status === "done") { resetEditHistory(); cancelTeamEdit(); setDraft(fresh(planning.data.team)); }
   }, [planning.data]);
@@ -529,7 +741,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
       return { request };
     },
     mutationFn: (team: Team) =>
-      proposeTeamEdit({ ...target, request: editRequest, team }),
+      proposeTeamEdit({ ...target, request: editRequest, team, locale }),
     onSuccess: ({ agentId }, _team, context) => {
       if (editRequestCounter.current !== context.request) return;
       setEditStarting(false);
@@ -547,7 +759,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
     const result = editPlanning.data;
     if (!draft || !editPlannerId || result?.status !== "done" || appliedEditId.current === editPlannerId) return;
     appliedEditId.current = editPlannerId;
-    const after = applyTeamEdit(draft, result.team);
+    const after = applyTeamEdit(draft, { ...result.team, language: result.team.language ?? draft.language });
     setHistory((current) => record(current, draft));
     setDraft(after);
     setEditNotice({ summary: summarizeTeamEdit(draft, after), validation: result.validation });
@@ -556,9 +768,9 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
   }, [draft, editPlannerId, editPlanning.data]);
   const editSummary = editNotice?.summary;
 
-  const start = useMutation({ onMutate: () => { resetEditHistory(); cancelTeamEdit(); }, mutationFn: () => propose({ ...target, goal }), onSuccess: ({ agentId }) => setPlannerId(agentId) });
+  const start = useMutation({ onMutate: () => { resetEditHistory(); cancelTeamEdit(); }, mutationFn: () => propose({ ...target, goal, locale }), onSuccess: ({ agentId }) => setPlannerId(agentId) });
   const applied = useMutation({
-    mutationFn: (team: Team) => apply({ ...target, team }),
+    mutationFn: (team: Team) => apply({ ...target, team, locale }),
     onSuccess: (result) => {
       void current.refetch();
       void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
@@ -567,7 +779,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
     },
   });
   const restarted = useMutation({
-    mutationFn: () => restartOrchestrator(target),
+    mutationFn: () => restartOrchestrator({ ...target, locale }),
     onSuccess: () => {
       void current.refetch();
       void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
@@ -587,36 +799,6 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
       roleRows.push(draft.roles.slice(i, i + columns).map((role, offset) => ({ role, index: i + offset })));
     }
   }
-  const pickerNeedle = pickerQuery.trim().toLowerCase();
-  const pickerOptions = picker ? (pickerNeedle ? picker.options.filter((option) => option.toLowerCase().includes(pickerNeedle)) : picker.options) : [];
-  const highlightedIndex = pickerOptions.length > 0 ? Math.min(highlight, pickerOptions.length - 1) : -1;
-  const pickOption = (option: string) => {
-    const active = pickerRef.current;
-    if (!active) return;
-    pickerRef.current = null;
-    setPicker(null);
-    setPickerQuery("");
-    active.onChange(option);
-  };
-  const pickHighlighted = () => {
-    if (highlightedIndex >= 0 && highlightedIndex < pickerOptions.length) {
-      pickOption(pickerOptions[highlightedIndex]!);
-    }
-  };
-  useEffect(() => {
-    if (!picker || highlightedIndex < 0) return;
-    const row = rowLayouts.current[highlightedIndex] ?? { y: highlightedIndex * 40, height: 36 };
-    const viewHeight = listHeight.current || 320;
-    const top = scrollY.current;
-    if (row.y < top) {
-      scrollY.current = row.y;
-      listRef.current?.scrollTo({ y: row.y, animated: false });
-    } else if (row.y + row.height > top + viewHeight) {
-      const nextY = row.y + row.height - viewHeight;
-      scrollY.current = nextY;
-      listRef.current?.scrollTo({ y: nextY, animated: false });
-    }
-  }, [highlightedIndex, picker, pickerQuery]);
   const teamBusy = plannerId !== null && (!planning.data || planning.data.status === "running");
   const progress = applied.isPending
     ? { status: t("result.applying"), error: null, onCancel: null }
@@ -642,15 +824,50 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
       <Text style={s.title}>{t("title", { project: data.project.name })}</Text>
       <Text style={s.muted}>{data.project.root}/{data.file ?? `${TEAMS_DIR}/`}</Text>
 
+      {data.toolsEnabled === false ? <Text style={s.danger}>{t("toolsOff")}</Text> : null}
       {data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
       {data.team && !draft ? (
         <View style={[s.card, { maxWidth: 960, width: "100%", alignSelf: "flex-start" }]}>
           <View style={[s.row, { justifyContent: "flex-end" }]}>
-            <Button s={s} label={t("current.edit")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(data.team); }} />
+            <Button s={s} label={t("current.edit")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft({ ...data.team!, language: data.team!.language ?? languageFromLocale(locale) }); }} />
             <Button s={s} secondary label={t("current.reapply")} disabled={applied.isPending || restarted.isPending} onPress={() => applied.mutate(data.team!)} />
             <Button s={s} secondary label={t("current.restart")} disabled={applied.isPending || restarted.isPending} onPress={() => setConfirmRestart(true)} />
           </View>
           <CurrentTeamTree team={data.team} s={s} colors={theme.colors} compact={layout.compact} icons={providerIcons} />
+          {data.team.candidates.length ? (
+            <View style={{ gap: 6 }}>
+              <Text style={s.muted}>{t("candidates.title")}</Text>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                {data.team.candidates.map((candidate) => (
+                  <View key={candidate.name} style={[s.card, { borderStyle: "dashed", backgroundColor: theme.colors.surface0, minWidth: 180, flexShrink: 1 }]}>
+                    <Text style={[s.text, { fontWeight: "700" }]}>{candidate.name}</Text>
+                    <TeamModel provider={candidate.provider} model={candidate.model} colors={theme.colors} icons={providerIcons} />
+                    {candidate.notes ? <Text style={s.muted} numberOfLines={4}>{candidate.notes}</Text> : null}
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+          <ModePicker s={s} colors={theme.colors} mode={data.team.mode} />
+          <LanguagePicker s={s} colors={theme.colors} language={data.team.language} />
+          <View style={s.row}>
+            <TextInput style={[s.input, { flex: 1, minWidth: 160 }]} value={presetName} placeholder={t("presets.saveAsPresetName")} onChangeText={setPresetName} />
+            <Button
+              s={s}
+              secondary
+              label={t("presets.saveAsPreset")}
+              disabled={!presetName.trim() || presetSettings.status !== "ready" || presetSettings.saving}
+              onPress={() => {
+                if (presetSettings.status !== "ready") return;
+                const preset = teamToPreset(data.team!, presetName, newPresetId(), new Date().toISOString());
+                void presetSettings.save({ presets: [...presetSettings.values.presets, preset] }, presetSettings.revision).then((saved) => {
+                  if (saved) { setSavedPreset(preset.name); setPresetName(""); }
+                });
+              }}
+            />
+          </View>
+          {savedPreset ? <Text style={s.success}>{t("presets.savedAsPreset", { name: savedPreset })}</Text> : null}
+          {presetSettings.saveError ? <Text style={s.danger}>{t("presets.saveFailed", { error: presetSettings.saveError })}</Text> : null}
           {data.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
           <Text style={s.muted}>{t("current.restartHint")}</Text>
         </View>
@@ -696,91 +913,6 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
         </Modal.Content>
       </Modal>
 
-      <Modal
-        title={picker?.label ?? ""}
-        open={picker !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            pickerRef.current = null;
-            setPicker(null);
-            setPickerQuery("");
-          }
-        }}
-      >
-        <Modal.Content>
-          {picker ? (
-            <>
-              <TextInput
-                style={s.input}
-                value={pickerQuery}
-                placeholder={t("role.searchPlaceholder")}
-                autoFocus
-                onChangeText={(text) => {
-                  rowLayouts.current = {};
-                  scrollY.current = 0;
-                  setPickerQuery(text);
-                  setHighlight(0);
-                }}
-                onKeyPress={(event) => {
-                  const key = event.nativeEvent.key;
-                  if (key === "ArrowDown") {
-                    event.preventDefault?.();
-                    if (pickerOptions.length > 0) {
-                      setHighlight((current) => Math.min(pickerOptions.length - 1, Math.min(current, pickerOptions.length - 1) + 1));
-                    }
-                  } else if (key === "ArrowUp") {
-                    event.preventDefault?.();
-                    if (pickerOptions.length > 0) {
-                      setHighlight((current) => Math.max(0, Math.min(current, pickerOptions.length - 1) - 1));
-                    }
-                  } else if (key === "Enter") {
-                    event.preventDefault?.();
-                    pickHighlighted();
-                  }
-                }}
-                onSubmitEditing={pickHighlighted}
-              />
-              <ScrollView
-                ref={listRef}
-                style={{ maxHeight: 320 }}
-                contentContainerStyle={{ gap: 4 }}
-                keyboardShouldPersistTaps="handled"
-                nestedScrollEnabled
-                scrollEventThrottle={16}
-                onLayout={(event) => {
-                  listHeight.current = event.nativeEvent.layout.height;
-                }}
-                onScroll={(event) => {
-                  scrollY.current = event.nativeEvent.contentOffset.y;
-                }}
-              >
-                {pickerOptions.length === 0 ? <Text style={s.muted}>{t(picker.options.length === 0 ? "role.noOptions" : "role.noMatches")}</Text> : null}
-                {pickerOptions.map((option, index) => {
-                  const selected = option === picker.value;
-                  const focused = index === highlightedIndex;
-                  return (
-                    <Pressable
-                      key={option}
-                      accessibilityRole="button"
-                      accessibilityLabel={option}
-                      accessibilityState={{ selected }}
-                      onLayout={(event) => {
-                        const { y, height } = event.nativeEvent.layout;
-                        rowLayouts.current[index] = { y, height };
-                      }}
-                      onPress={() => pickOption(option)}
-                      style={selected ? (focused ? s.optionOnActive : s.optionOn) : focused ? s.optionActive : s.option}
-                    >
-                      <Text style={selected ? s.buttonText : s.text}>{option}</Text>
-                      {selected ? <Text style={s.buttonText}>✓</Text> : null}
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </>
-          ) : null}
-        </Modal.Content>
-      </Modal>
 
       <InstructionsDialog
         s={s}
@@ -801,14 +933,26 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
           <Text style={s.text}>{t(here === null ? "create.intro" : "create.introHere")}</Text>
           <TextInput style={s.input} value={goal} placeholder={t("create.goalPlaceholder")} onChangeText={setGoal} />
           <View style={s.row}>
-            <Button s={s} label={t("create.propose")} disabled={!goal.trim() || start.isPending || planning.data?.status === "running"} onPress={() => start.mutate()} />
-            <Button s={s} secondary label={t("create.blank")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(fresh({ version: 1, goal, orchestrator: { workspace: "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])] })); }} />
+            <Button s={s} label={goal.trim() ? t("create.propose") : t("create.proposeFromProject")} disabled={start.isPending || planning.data?.status === "running"} onPress={() => start.mutate()} />
+            <Button s={s} secondary label={t("create.blank")} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(fresh({ version: 1, goal, mode: "auto", orchestrator: { workspace: "orchestrator", provider: "claude", model: catalog.find((entry) => entry.id === "claude")?.models[0]?.id ?? "" }, roles: [newRole(catalog, [])], candidates: [] })); }} />
+          </View>
+          {presets.length ? (
+            <View style={{ gap: 6 }}>
+              <Text style={s.muted}>{t("presets.fromPreset")}</Text>
+              <View style={s.row}>
+                {presets.map((preset) => (
+                  <Button key={preset.id} s={s} secondary label={preset.name} onPress={() => { resetEditHistory(); cancelTeamEdit(); setDraft(fresh(presetToTeam(preset, "orchestrator", { goal }))); }} />
+                ))}
+              </View>
+            </View>
+          ) : null}
+          <View style={s.row}>
           </View>
           {planning.data?.status === "failed" ? planning.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
           {start.error ? <Text style={s.danger}>{String(start.error)}</Text> : null}
         </View>
       ) : (
-        <SelectContext.Provider value={openSelect}>
+        <SelectHost s={s}>
           <View style={{ gap: 10 }}>
             <Text style={s.title}>{t("review.title")}</Text>
             <View style={s.orchestratorCard}>
@@ -819,6 +963,12 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
                 <Text style={s.text}>{t("review.orchestratorHere", { workspace: here })}</Text>
               )}
               <ModelPicker s={s} catalog={catalog} provider={draft.orchestrator.provider} model={draft.orchestrator.model} onChange={(next) => setDraft((current) => (current ? { ...current, orchestrator: { ...current.orchestrator, ...next } } : current))} />
+              <ModePicker s={s} colors={theme.colors} mode={draft.mode} onChange={(mode) => setDraft((current) => (current ? { ...current, mode } : current))} />
+              <LanguagePicker s={s} colors={theme.colors} language={draft.language} onChange={(language) => setDraft((current) => (current ? { ...current, language } : current))} />
+            </View>
+            <View style={{ gap: 2 }}>
+              <Text style={s.title}>{t("review.rolesTitle")}</Text>
+              <Text style={s.muted}>{t("review.rolesHint")}</Text>
             </View>
             <View style={s.roleGroupWrap}>
               <View style={s.roleConnector} />
@@ -840,6 +990,22 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
                   </View>
                 ))}
                 <Button s={s} secondary label={t("review.addRole")} onPress={() => setDraft((current) => (current ? { ...current, roles: [...current.roles, newRole(catalog, current.roles.map((role) => role.name))] } : current))} />
+                <View style={{ gap: 2, marginTop: 6 }}>
+                  <Text style={s.title}>{t("candidates.title")}</Text>
+                  <Text style={s.muted}>{t("candidates.hint")}</Text>
+                </View>
+                {draft.candidates.length === 0 ? <Text style={s.muted}>{t("candidates.none")}</Text> : null}
+                {draft.candidates.map((candidate, index) => (
+                  <CandidateEditor
+                    key={index}
+                    s={s}
+                    candidate={candidate}
+                    catalog={catalog}
+                    onChange={(next) => setDraft((current) => (current ? { ...current, candidates: current.candidates.map((entry, at) => (at === index ? next : entry)) } : current))}
+                    onRemove={() => setDraft((current) => (current ? { ...current, candidates: current.candidates.filter((_, at) => at !== index) } : current))}
+                  />
+                ))}
+                <Button s={s} secondary label={t("candidates.add")} onPress={() => setDraft((current) => (current ? { ...current, candidates: [...current.candidates, newCandidate(catalog, current.candidates.map((entry) => entry.name))] } : current))} />
                 <View style={s.card}>
                   <TextInput style={s.input} value={editRequest} placeholder={t("review.teamEditRequest")} multiline onChangeText={setEditRequest} />
                   <View style={s.row}>
@@ -857,7 +1023,9 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
                       {editSummary.changed.map(({ name, fields }) => <Text key={`changed-${name}`} style={s.text}>{t("review.editChanged", { name, fields: fields.map((field) => t(`role.${field}`)).join(", ") })}</Text>)}
                       {editSummary.orchestrator ? <Text style={s.text}>{t("review.editOrchestratorChanged")}</Text> : null}
                       {editSummary.goal ? <Text style={s.text}>{t("review.editGoalChanged")}</Text> : null}
-                      {!editSummary.added.length && !editSummary.removed.length && !editSummary.changed.length && !editSummary.orchestrator && !editSummary.goal ? <Text style={s.muted}>{t("review.editNoChanges")}</Text> : null}
+                      {editSummary.mode ? <Text style={s.text}>{t("review.editModeChanged")}</Text> : null}
+                      {editSummary.candidates ? <Text style={s.text}>{t("review.editCandidatesChanged")}</Text> : null}
+                      {!editSummary.added.length && !editSummary.removed.length && !editSummary.changed.length && !editSummary.orchestrator && !editSummary.goal && !editSummary.mode && !editSummary.candidates ? <Text style={s.muted}>{t("review.editNoChanges")}</Text> : null}
                       {editNotice.validation.map((error) => <Text key={error.target + error.message} style={s.danger}>{error.target}: {error.message}</Text>)}
 
                     </View>
@@ -869,10 +1037,10 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
             {problems.map((problem) => <Text key={problem} style={s.danger}>{problem}</Text>)}
             <View style={s.row}>
               <Button s={s} label={t("review.apply")} disabled={problems.length > 0 || applied.isPending} onPress={() => applied.mutate(draft)} />
-              <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelTeamEdit(); resetEditHistory(); setEditRequest(""); setPicker(null); setEditingRoleIndex(null); setDraft(null); setPlannerId(null); }} />
+              <Button s={s} secondary label={t("review.cancel")} onPress={() => { if (plannerId) cancelled.mutate(); cancelTeamEdit(); resetEditHistory(); setEditRequest(""); setEditingRoleIndex(null); setDraft(null); setPlannerId(null); }} />
             </View>
           </View>
-        </SelectContext.Provider>
+        </SelectHost>
       )}
 
       {cancelled.error ? <Text style={s.danger}>{String(cancelled.error)}</Text> : null}

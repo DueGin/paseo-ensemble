@@ -49,6 +49,8 @@ export interface AgentNode {
 /** A team's roles; each workspaceId is the orchestrator's (null when it doesn't exist yet). */
 export interface RosterTeam {
   orchestratorWorkspaceId: string | null;
+  /** The team file's collaboration mode. */
+  mode?: string;
   roles: { name: string; provider: string; model: string; workspaceId: string | null }[];
 }
 
@@ -251,4 +253,62 @@ export function buildAgentForest(agents: readonly DashboardAgent[], workspaceIds
   }
   const trees = nodes.filter((node) => node.children.length).sort((a, b) => Number(b.kind === "orchestrator") - Number(a.kind === "orchestrator") || newestFirst(a, b));
   return { trees, solo: nodes.filter((node) => !node.children.length).sort(newestFirst) };
+}
+
+/** The top of the agent's parent chain among `agents`; the agent itself when its parent isn't listed. */
+export function sessionRootOf(agents: readonly DashboardAgent[], agentId: string, options: { sameWorkspace?: boolean } = {}): string {
+  const byId = new Map(agents.map((agent) => [agent.id, agent]));
+  let current = byId.get(agentId);
+  if (!current) return agentId;
+  const seen = new Set([current.id]);
+  for (;;) {
+    const parent = parentOf(current);
+    const next = parent === undefined ? undefined : byId.get(parent);
+    if (!next || seen.has(next.id) || (options.sameWorkspace && next.workspaceId !== current.workspaceId)) break;
+    seen.add(next.id);
+    current = next;
+  }
+  return current.id;
+}
+
+/** A session's agents: its root and every agent started below it, provider sub-agents included. */
+export function sessionMembers(agents: readonly DashboardAgent[], rootId: string): Set<string> {
+  const children = new Map<string, string[]>();
+  for (const agent of agents) {
+    const parent = parentOf(agent);
+    if (parent !== undefined) children.set(parent, [...(children.get(parent) ?? []), agent.id]);
+  }
+  const members = new Set([rootId]);
+  const pending = [rootId];
+  while (pending.length) {
+    for (const child of children.get(pending.pop()!) ?? []) {
+      if (members.has(child)) continue;
+      members.add(child);
+      pending.push(child);
+    }
+  }
+  return members;
+}
+
+function holds(node: AgentNode, ids: ReadonlySet<string>): boolean {
+  return ids.has(node.agent.id) || node.children.some((child) => holds(child, ids));
+}
+
+/** The whole trees and solo cards of the forest that hold any of the ids. */
+export function pickForest(forest: AgentForest, ids: ReadonlySet<string>): AgentForest {
+  return { trees: forest.trees.filter((node) => holds(node, ids)), solo: forest.solo.filter((node) => holds(node, ids)) };
+}
+
+/**
+ * Only the session the agent is in: the tree of the top of its parent chain, which also holds role sessions the team's
+ * orchestrator adopted. A root that is hidden (closed, archived) leaves its shown descendants, which are picked instead.
+ */
+export function sessionForest(forest: AgentForest, agents: readonly DashboardAgent[], agentId: string): AgentForest {
+  const root = sessionRootOf(agents, agentId);
+  return pickForest(forest, new Set([...sessionMembers(agents, root), agentId]));
+}
+
+/** The trees and solo cards whose root runs in the workspace; agents they started elsewhere stay under them. */
+export function workspaceForest(forest: AgentForest, workspaceId: string): AgentForest {
+  return { trees: forest.trees.filter((node) => node.agent.workspaceId === workspaceId), solo: forest.solo.filter((node) => node.agent.workspaceId === workspaceId) };
 }

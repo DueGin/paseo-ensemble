@@ -1,8 +1,8 @@
 {
   "name": "paseo-agent-team",
   "private": true,
-  "version": "0.2.15",
-  "description": "Project-scoped agent teams for Paseo: one role per workspace, each with its own provider and model, led by an orchestrator.",
+  "version": "0.3.0",
+  "description": "Project-scoped agent teams for Paseo: roles on their own providers and models, led by an orchestrator in team (intake + shared board) or delegation mode, with a per-session dashboard.",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -17,8 +17,8 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@getpaseo/client": "0.13.0",
-    "@getpaseo/plugin": "0.13.0",
+    "@getpaseo/client": "0.15.4",
+    "@getpaseo/plugin": "0.15.4",
     "@tanstack/react-query": "^5.90.11",
     "@types/node": "^22.20.4",
     "@types/react": "~19.2.0",

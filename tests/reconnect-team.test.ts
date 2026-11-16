@@ -9,6 +9,8 @@ import { TEAMS_DIR } from "../shared/team-files";
 
 const team = (workspace: string): Team => ({
   version: 1,
+  mode: "delegation",
+  candidates: [],
   goal: "Ship it",
   orchestrator: { workspace, provider: "claude", model: "m" },
   roles: [{ name: "qa", provider: "codex", model: "n", folders: ["tests"], instructions: "Test it." }],

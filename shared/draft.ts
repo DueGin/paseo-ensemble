@@ -1,4 +1,4 @@
-import type { Role } from "./team";
+import type { Candidate, Role } from "./team";
 import type { ProviderInfo } from "./validate";
 
 export function parseFolders(text: string): string[] {
@@ -24,4 +24,10 @@ export function uniqueName(base: string, taken: readonly string[]): string {
 export function newRole(catalog: readonly ProviderInfo[], takenNames: readonly string[]): Role {
   const provider = catalog.find((entry) => entry.ready);
   return { name: uniqueName("role", takenNames), provider: provider?.id ?? "", model: provider?.models[0]?.id ?? "", folders: [], instructions: "" };
+}
+
+/** A blank candidate member on the first ready provider; its name stays empty and is derived from the model on save. */
+export function newCandidate(catalog: readonly ProviderInfo[], _takenNames: readonly string[] = []): Candidate {
+  const provider = catalog.find((entry) => entry.ready);
+  return { name: "", provider: provider?.id ?? "", model: provider?.models[0]?.id ?? "", notes: "" };
 }

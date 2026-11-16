@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { applyTeam, cancelProposal, deleteTeam, pendingProposal, projectTeamsList, proposeTeam, readTeam, teamProposal } from "../server/team";
 import { workspaceLabel } from "../shared/apply-plan";
-import { CLAUDE_LOCAL_SETTINGS, needsRunPermission, PASEO_RUN_RULE } from "../shared/permissions";
+import { CLAUDE_LOCAL_SETTINGS, claudeToolRules } from "../shared/permissions";
 import { TeamSchema, type Team } from "../shared/team";
 import { agentModeOf } from "../shared/validate";
 
@@ -135,10 +135,10 @@ describe.skipIf(!process.env.PASEO_E2E)("server handlers against the local daemo
     expect(again.ok && again.orchestratorAgentId).toBe(result.orchestratorAgentId);
     expect(again.ok && again.file).toBe(result.file);
 
-    // A Claude orchestrator with a role in an unattended mode gets the paseo run allow rule, once.
-    if (needsRunPermission(proposed, (await paseo.providers.snapshot()).entries)) {
+    // A team with Claude agents gets allow rules for the team tools they call, once.
+    if (claudeToolRules(proposed).length) {
       expect(result.permission).toBe(join(root, CLAUDE_LOCAL_SETTINGS));
-      expect(JSON.parse(readFileSync(join(root, CLAUDE_LOCAL_SETTINGS), "utf8")).permissions.allow).toEqual([PASEO_RUN_RULE]);
+      expect(JSON.parse(readFileSync(join(root, CLAUDE_LOCAL_SETTINGS), "utf8")).permissions.allow).toEqual(claudeToolRules(proposed));
     } else {
       expect(result.permission).toBeNull();
     }

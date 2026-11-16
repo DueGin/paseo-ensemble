@@ -1,7 +1,8 @@
 import { planWorkspaces, workspaceLabel, type WorkspaceRef } from "./apply-plan";
 import type { Team } from "./team";
+import { LANGUAGE_LABEL } from "./modes";
 
-/** Label key on the agents this plugin starts; the value is the agent's job. */
+/** Label key on the agents this plugin starts; the value is the agent's job: planner, orchestrator or member. */
 export const LABEL = "workspace-agents";
 
 /** Label key on a team planner naming the workspace or project its proposal is for, so a reopened screen can find it again. */
@@ -64,7 +65,9 @@ export function findOrchestrator(agents: readonly OrchestratorCandidate[], works
       !agent.archivedAt &&
       agent.provider === team.orchestrator.provider &&
       agent.model === team.orchestrator.model &&
-      (modeId === undefined || agent.currentModeId === modeId),
+      (modeId === undefined || agent.currentModeId === modeId) &&
+      // Its instructions and tools are in the language it started with; another language needs a new lead.
+      (agent.labels[LANGUAGE_LABEL] ?? "en") === (team.language ?? "en"),
   );
 }
 
@@ -73,10 +76,14 @@ export function orchestratorsToArchive(agents: readonly AgentRef[], workspaceId:
   return agents.filter((agent) => agent.workspaceId === workspaceId && agent.labels[LABEL] === "orchestrator" && !agent.archivedAt).map((agent) => agent.id);
 }
 
-/** What a deleted team leaves to archive: its orchestrators and labelled roles in its workspaces, and planners proposing for them anywhere. */
+/**
+ * What a deleted team leaves to archive: its orchestrators, members (including helpers) and labelled roles in its
+ * workspaces, and planners proposing for them anywhere.
+ */
 export function teamAgentsToArchive(agents: readonly AgentRef[], workspaceIds: readonly string[], roles: readonly string[]): string[] {
   const names = new Set(roles.map((role) => role.toLowerCase()));
+  const own = (agent: AgentRef) => agent.labels[LABEL] === "orchestrator" || agent.labels[LABEL] === "member" || names.has((agent.labels.role ?? "").toLowerCase());
   return agents
-    .filter((agent) => !agent.archivedAt && ((workspaceIds.includes(agent.workspaceId ?? "") && (agent.labels[LABEL] === "orchestrator" || names.has((agent.labels.role ?? "").toLowerCase()))) || (agent.labels[LABEL] === "planner" && workspaceIds.includes(agent.labels[PROPOSAL_FOR] ?? ""))))
+    .filter((agent) => !agent.archivedAt && ((workspaceIds.includes(agent.workspaceId ?? "") && own(agent)) || (agent.labels[LABEL] === "planner" && workspaceIds.includes(agent.labels[PROPOSAL_FOR] ?? ""))))
     .map((agent) => agent.id);
 }

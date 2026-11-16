@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { orchestratorPrompt, teamChangedMessage } from "../shared/prompt";
+import { addTasks, createRun, type Brief } from "../shared/collab";
+import { ALL_TOOLS, LEAD_TOOLS, MEMBER_TOOLS, PLUGIN_MESSAGE_PREFIX } from "../shared/modes";
+import { assignmentPrompt, broadcastPrompt, delegationTaskPrompt, leadNoticePrompt, memberSystemPrompt, mentionPrompt, modeChangedPrompt, orchestratorPrompt, orchestratorReadyPrompt, planReviewedPrompt, roleHeader, teamChangedMessage, teamKickoffPrompt, teamRoundPrompt } from "../shared/prompt";
 import type { Team } from "../shared/team";
 
 const team: Team = {
   version: 1,
   goal: "2D platformer game",
+  mode: "auto",
+  candidates: [],
   orchestrator: { workspace: "orchestrator", provider: "claude", model: "claude-opus-5-5" },
   roles: [
     { name: "design", provider: "codex", model: "gpt-6.1-sol", folders: ["src/ui", "assets/images"], instructions: "Owns UI and art." },
@@ -12,141 +16,196 @@ const team: Team = {
   ],
 };
 
-const modes = { design: "full-access", sound: undefined };
+const file = ".agents/teams/orchestrator.json";
 
 describe("orchestratorPrompt", () => {
-  const prompt = orchestratorPrompt(team, modes, ".agents/teams/orchestrator.json");
+  const prompt = orchestratorPrompt(team, file);
 
-  it("states the goal and the team's own file", () => {
+  it("states the goal and the team's own file, and ignores other teams", () => {
     expect(prompt).toContain("2D platformer game");
-    expect(prompt).toContain("The team is defined in .agents/teams/orchestrator.json at the project root.");
-  });
-
-  it("tells it to ignore the other teams of the project", () => {
+    expect(prompt).toContain(`The team is defined in ${file} at the project root.`);
     expect(prompt).toMatch(/other teams/i);
   });
 
-  it("lists every role with its provider/model, mode and folders, and no per-role workspace column", () => {
-    expect(prompt).toContain("| Role | Provider/model | Mode | Folders |");
-    expect(prompt).not.toContain("| Workspace |");
-    expect(prompt).toContain("| design | codex/gpt-6.1-sol | full-access | src/ui, assets/images |");
-    expect(prompt).toContain("| sound | antigravity/gemini-4-argon-high | default | (any) |");
+  it("lists every role with its provider/model and folders, and its notes", () => {
+    expect(prompt).toContain("| Role | Provider/model | Folders |");
+    expect(prompt).toContain("| design | codex/gpt-6.1-sol | src/ui, assets/images |");
+    expect(prompt).toContain("| sound | antigravity/gemini-4-argon-high | (any) |");
     expect(prompt).toContain("- design: Owns UI and art.");
+    expect(prompt).toContain('Every member runs in your workspace "orchestrator"');
   });
 
-  it("tells it how to delegate with the role's own provider and model", () => {
-    expect(prompt).toContain("paseo run --workspace <your-workspace-id> --provider <provider>/<model>");
-    expect(prompt).toContain("--mode <mode>");
-    expect(prompt).toMatch(/omit `--mode` when the Mode is `default`/i);
-    expect(prompt).not.toContain("Add `--mode auto` when the provider offers");
-    expect(prompt).toMatch(/wait/);
+  it("names the configured mode and tells it to check the session's current mode first", () => {
+    expect(prompt).toContain("Configured mode: auto");
+    expect(prompt).toContain(`call ${LEAD_TOOLS.status}`);
+    expect(prompt).toMatch(/user can switch it/);
+    expect(orchestratorPrompt({ ...team, mode: "team" }, file)).toContain("Configured mode: team");
+    expect(orchestratorPrompt({ ...team, mode: "delegation" }, file)).toContain("Configured mode: delegation");
   });
 
-  it("forbids swapping the role's mode or provider when a start is denied", () => {
-    expect(prompt).toMatch(/never substitute another mode or provider/i);
-    expect(prompt).toMatch(/denied.*tell the user/is);
+  it("describes delegation: self-contained tasks, isolated members, wait and report", () => {
+    expect(prompt).toContain("## Delegation mode (MA-04)");
+    expect(prompt).toContain(LEAD_TOOLS.delegate);
+    expect(prompt).toMatch(/sees only its own task/);
+    expect(prompt).toContain(LEAD_TOOLS.wait);
+    expect(prompt).toContain("`helper`");
   });
 
-  it("tells it that every role runs in its own workspace and how to find a role's agent", () => {
-    expect(prompt).toContain('Every role runs in the orchestrator\'s workspace "orchestrator".');
-    expect(prompt).toMatch(/in your own workspace/);
-    expect(prompt).toMatch(/unarchived agent labelled role=<role>.*send/s);
-    expect(prompt).not.toContain("(shared)");
-    expect(prompt).not.toContain("<orchestrator-workspace-id>");
+  it("describes team mode as intake first: no member sees the request before the user confirms a brief", () => {
+    expect(prompt).toContain("## Team mode (MA-08)");
+    expect(prompt).toMatch(/liaison/);
+    expect(prompt).toMatch(/Never pass the user's message on as it is/);
+    expect(prompt).toMatch(/Intake:.*ask/s);
+    expect(prompt).toMatch(/do not start members/);
+    expect(prompt).toMatch(/Record it all with team_brief, show the brief and the tasks to the user, ask them to confirm or correct, and end your turn/);
+    expect(prompt).toMatch(/Only after the user replies to confirm it, call team_kickoff/);
+    expect(prompt).toContain("userConfirmation");
+    expect(prompt).toContain(LEAD_TOOLS.board);
+    expect(prompt).toMatch(/break the work into tasks/);
+    expect(prompt).toContain(LEAD_TOOLS.tasks);
+    expect(prompt).toContain(LEAD_TOOLS.close);
+    expect(prompt).toMatch(/hands open tasks to idle members/);
   });
 
-  it("tells it how to find its own workspace id by title", () => {
-    expect(prompt).toContain('Your own workspace id is the one whose title is "orchestrator"');
-    expect(prompt).toContain("paseo workspace ls --json");
-    expect(prompt).toContain("<your-workspace-id>");
+  it("lists candidate members with their full descriptions, and has work assigned by them", () => {
+    expect(prompt).not.toContain("Candidate members");
+    const preset = orchestratorPrompt({ ...team, roles: [], candidates: [
+      { name: "opus", provider: "claude", model: "claude-opus-5-5", notes: "Good at: architecture, hard bugs\nSlow and expensive\nDo not give it: routine edits" },
+      { name: "sol", provider: "codex", model: "gpt-6.1-sol", notes: "" },
+    ] }, file);
+    expect(preset).toContain("No fixed roles: assign work to the candidate members below, by their descriptions.");
+    expect(preset).toContain("- opus (claude/claude-opus-5-5)\n  Good at: architecture, hard bugs\n  Slow and expensive\n  Do not give it: routine edits");
+    expect(preset).toContain("- sol (codex/gpt-6.1-sol)\n  (no description)");
+    expect(preset).toMatch(/A candidate is a model, not a job/);
+    expect(preset).toMatch(/must not do, or is not suited for, as a hard rule: never give it that work/);
+    expect(preset).toMatch(/give work straight to a candidate by its name/);
+    expect(preset).toContain(LEAD_TOOLS.role);
+    expect(preset).not.toContain("`helper`");
   });
 
-  it("titles started agents <role>#<id> and still labels them with the role", () => {
-    expect(prompt).toContain("--title <role>#<id>");
-    expect(prompt).toContain("role=<role>");
+  it("forbids starting members any other way and says what to do without the tools", () => {
+    expect(prompt).toMatch(/Never start them with paseo run, create_agent/);
+    expect(prompt).toMatch(/team_\* tools are missing.*stop/s);
+    expect(prompt).not.toContain("paseo run --workspace");
   });
 
-  it("omits the role notes section when no role has instructions", () => {
-    const bare = orchestratorPrompt({ ...team, roles: [team.roles[1]!] }, modes, ".agents/team.json");
-    expect(bare).not.toContain("Role notes");
-  });
-});
-
-describe("teamChangedMessage", () => {
-  it("starts with the re-read sentence", () => {
-    const message = teamChangedMessage(team, modes, ".agents/team.json");
-    expect(message.startsWith("The team in .agents/team.json changed. Re-read it and use it from now on.")).toBe(true);
-  });
-
-  it("contains the team table with the Mode column and no per-role workspace column", () => {
-    const message = teamChangedMessage(team, modes, ".agents/team.json");
-    expect(message).toContain("| Role | Provider/model | Mode | Folders |");
-    expect(message).not.toContain("| Workspace |");
-    expect(message).toContain("| design | codex/gpt-6.1-sol | full-access | src/ui, assets/images |");
-    expect(message).toContain("| sound | antigravity/gemini-4-argon-high | default | (any) |");
-  });
-
-  it("says earlier per-role workspace instructions no longer apply, and where roles run", () => {
-    const message = teamChangedMessage(team, modes, ".agents/team.json");
-    expect(message).toContain('Every role now runs in the orchestrator\'s workspace "orchestrator".');
-    expect(message).toMatch(/Earlier instructions about per-role workspaces no longer apply/);
-    expect(message).toMatch(/only in your own workspace/);
-    expect(message).toMatch(/label role=<role>.*send/s);
-    expect(message).not.toContain("(shared)");
-  });
-
-  it("tells it how to find its own workspace id by title", () => {
-    const message = teamChangedMessage(team, modes, ".agents/team.json");
-    expect(message).toContain('Your own workspace id is the one whose title is "orchestrator"');
-    expect(message).toContain("paseo workspace ls --json");
-    expect(message).toContain("<your-workspace-id>");
-  });
-
-  it("repeats the --mode rule", () => {
-    const message = teamChangedMessage(team, modes, ".agents/team.json");
-    expect(message).toContain("--mode");
-    expect(message).toContain("`default`");
-    expect(message).toMatch(/never substitute another mode or provider/i);
+  it("has no doubled blank lines", () => {
+    expect(prompt).not.toMatch(/\n\n\n/);
   });
 });
 
-describe("role features", () => {
-  const file = ".agents/teams/orchestrator.json";
-  const features = { design: { auto_accept: true as const }, sound: undefined };
-  const rule = 'For roles with Features other than "-", use the Paseo `create_agent` tool';
-
-  it("renders the same as the 3-argument call without features", () => {
-    const orchestrator = orchestratorPrompt(team, modes, file);
-    const changed = teamChangedMessage(team, modes, file);
-    for (const none of [undefined, { design: undefined, sound: undefined }]) {
-      expect(orchestratorPrompt(team, modes, file, none)).toBe(orchestrator);
-      expect(teamChangedMessage(team, modes, file, none)).toBe(changed);
-    }
-    expect(orchestrator).not.toContain("Features");
-    expect(orchestrator).not.toContain("create_agent");
-    expect(changed).not.toContain("create_agent");
-  });
-
-  it("adds a Features column with the toggle for the role that has it and - for the others", () => {
-    for (const text of [orchestratorPrompt(team, modes, file, features), teamChangedMessage(team, modes, file, features)]) {
-      expect(text).toContain("| Role | Provider/model | Mode | Folders | Features |");
-      expect(text).toContain("| --- | --- | --- | --- | --- |");
-      expect(text).toContain('| design | codex/gpt-6.1-sol | full-access | src/ui, assets/images | {"auto_accept":true} |');
-      expect(text).toContain("| sound | antigravity/gemini-4-argon-high | default | (any) | - |");
+describe("lead messages", () => {
+  it("marks every message the plugin sends, so intake checks can skip them", () => {
+    const run = createRun({ id: "R0001", leadAgentId: "lead", workspaceId: "w", mode: "team", title: "t", now: "2026-11-12T00:00:00Z" });
+    for (const text of [orchestratorReadyPrompt(file), teamChangedMessage(team, file), leadNoticePrompt(run), modeChangedPrompt("team", "auto"), delegationTaskPrompt(run, "x"), teamRoundPrompt(run, 0), broadcastPrompt(run, "x"), mentionPrompt(run, [])]) {
+      expect(text.startsWith(PLUGIN_MESSAGE_PREFIX)).toBe(true);
     }
   });
 
-  it("bulleted create_agent rule in the orchestrator prompt, unbulleted in the team-changed message", () => {
-    const prompt = orchestratorPrompt(team, modes, file, features);
-    const message = teamChangedMessage(team, modes, file, features);
-    expect(prompt).toContain(`- ${rule}`);
-    expect(message).toContain(rule);
-    expect(message).not.toContain(`- ${rule}`);
-    expect(message.split("\n").some((line) => line.startsWith(rule))).toBe(true);
+  it("tells a re-applied lead to re-read the team and use the team tools", () => {
+    const message = teamChangedMessage({ ...team, mode: "team" }, file);
+    expect(message).toContain(`The team in ${file} changed. Re-read it`);
+    expect(message).toContain("Configured collaboration mode: team");
+    expect(message).toContain(LEAD_TOOLS.kickoff);
+    expect(message).toContain("| design | codex/gpt-6.1-sol | src/ui, assets/images |");
   });
 
-  it("says paseo run cannot set features", () => {
-    expect(orchestratorPrompt(team, modes, file, features)).toContain("`paseo run` cannot set features");
-    expect(teamChangedMessage(team, modes, file, features)).toContain("`paseo run` cannot set features");
+  it("tells an idle lead what to do when a run finished", () => {
+    const team2 = createRun({ id: "R0002", leadAgentId: "lead", workspaceId: "w", mode: "team", title: "Login", now: "x" });
+    expect(leadNoticePrompt(team2)).toMatch(/acceptance criteria/);
+    const delegation = createRun({ id: "R0003", leadAgentId: "lead", workspaceId: "w", mode: "delegation", title: "Docs", now: "x" });
+    expect(leadNoticePrompt(delegation)).toContain(LEAD_TOOLS.wait);
+  });
+
+  it("says the session's mode when the user switches it, or the file's when cleared", () => {
+    expect(modeChangedPrompt("team", "auto")).toContain("collaboration mode to team");
+    expect(modeChangedPrompt(null, "delegation")).toContain("to delegation (the team file's mode)");
+  });
+});
+
+describe("member prompts", () => {
+  const brief: Brief = { title: "Title screen", goal: "Redesign the title screen", requirements: ["New logo"], acceptance: ["Builds", "Logo shows"], constraints: ["No new deps"], outOfScope: [], userConfirmation: "yes" };
+
+  it("repeats a formed role's notes in task messages", () => {
+    expect(roleHeader({ name: "api", folders: ["src/api"], instructions: "REST only" })).toBe("Your role in this session: api. Role notes: REST only Your folders: src/api.");
+  });
+
+  it("gives a member its role, folders and notes, and explains both kinds of run", () => {
+    const prompt = memberSystemPrompt(team, team.roles[0]!);
+    expect(prompt).toContain('"design" member');
+    expect(prompt).toContain("Your folders: src/ui, assets/images");
+    expect(prompt).toContain("Owns UI and art.");
+    for (const tool of Object.values(MEMBER_TOOLS)) expect(prompt).toContain(tool);
+    expect(memberSystemPrompt(team, team.roles[1]!)).toMatch(/no folder limit/);
+  });
+
+  it("keeps a delegated task isolated", () => {
+    const run = createRun({ id: "R00AA", leadAgentId: "lead", workspaceId: "w", mode: "delegation", title: "t", now: "x" });
+    const prompt = delegationTaskPrompt(run, "Draw a logo in src/ui/logo.svg");
+    expect(prompt).toContain("Draw a logo in src/ui/logo.svg");
+    expect(prompt).toMatch(/don't see the other members' tasks/);
+    expect(prompt).toMatch(/only the lead reads your result/);
+  });
+
+  it("hands a team member the agreed brief, the task board, the other members and the board protocol", () => {
+    let run = createRun({ id: "R00BB", leadAgentId: "lead", workspaceId: "w", mode: "team", title: "t", now: "x" });
+    run = addTasks(run, [{ title: "Logo", role: "design" }, { title: "Jingle", role: "sound" }, { title: "Mix", role: "sound", after: ["2"] }], "lead", "x").run;
+    const prompt = teamKickoffPrompt(run, brief, team.roles, team.roles[1]!);
+    expect(prompt).toContain("# Title screen");
+    expect(prompt).toContain("Acceptance criteria:\n- Builds\n- Logo shows");
+    expect(prompt).toContain("- design: folders src/ui, assets/images · Owns UI and art.");
+    expect(prompt).toContain('You are "sound".');
+    expect(prompt).toContain("- T3 [todo, waits for T2] (sound) Mix");
+    expect(prompt).toContain("Ready for you now: T2.");
+    expect(prompt).toContain(MEMBER_TOOLS.task);
+    expect(prompt).toContain(MEMBER_TOOLS.claim);
+    expect(prompt).toMatch(/action "claim"/);
+    expect(prompt).not.toMatch(/plan approval/);
+    expect(prompt).toContain("round 1 of 2");
+  });
+
+  it("tells members to submit plans first when the run needs plan approval", () => {
+    const run = createRun({ id: "R00BC", leadAgentId: "lead", workspaceId: "w", mode: "team", title: "t", planApproval: true, now: "x" });
+    expect(teamKickoffPrompt(run, brief, team.roles, team.roles[0]!)).toMatch(/plan approval: after claiming a task, submit your plan/);
+  });
+
+  it("hands an idle member a task, and tells it the lead's verdict on its plan", () => {
+    let run = createRun({ id: "R00BD", leadAgentId: "lead", workspaceId: "w", mode: "team", title: "t", now: "x" });
+    run = addTasks(run, [{ title: "Logo", detail: "SVG, 64px", role: "design", files: ["src/ui/logo.svg"] }], "lead", "x").run;
+    const task = { ...run.tasks[0]!, feedback: "too big" };
+    const assigned = assignmentPrompt(run, task, "Your role in this session: design.");
+    expect(assigned).toContain("T1: Logo\nSVG, 64px\nFiles: src/ui/logo.svg\nSent back before: too big");
+    expect(assigned).toContain("Your role in this session: design.");
+    expect(assigned).toMatch(/mark it done/);
+    const verdicts = planReviewedPrompt(run, [
+      { ...task, plan: { text: "p", status: "approved", feedback: "", notified: true, delivered: false } },
+      { ...task, id: "T2", title: "Icon", plan: { text: "p", status: "rejected", feedback: "use the palette", notified: true, delivered: false } },
+    ]);
+    expect(verdicts).toContain('approved your plan for T1 "Logo".');
+    expect(verdicts).toContain('sent back your plan for T2 "Icon": use the palette');
+  });
+
+  it("asks for a review of the others' done tasks in the next round, from where the member last read", () => {
+    const run = { ...createRun({ id: "R00CC", leadAgentId: "lead", workspaceId: "w", mode: "team", title: "t", now: "x" }), round: 2 };
+    const prompt = teamRoundPrompt(run, 7);
+    expect(prompt).toContain("round 2 of 2: review");
+    expect(prompt).toContain("since 7");
+    expect(prompt).toMatch(/action "reject"/);
+  });
+
+  it("wakes a member with every message addressed to it", () => {
+    const run = createRun({ id: "R00DD", leadAgentId: "lead", workspaceId: "w", mode: "team", title: "t", now: "x" });
+    const post = (seq: number, text: string) => ({ seq, at: "x", round: 1, author: "design", agentId: "d", kind: "question" as const, text, to: ["sound"], files: [] });
+    const prompt = mentionPrompt(run, [post(3, "Which sample rate?"), post(4, "Stereo?")]);
+    expect(prompt).toContain("📬 2 new messages for you:");
+    expect(prompt).toContain("#3 [round 1] design · question → sound");
+    expect(prompt).toContain("Stereo?");
+  });
+});
+
+describe("tool names", () => {
+  it("are valid Paseo agent tool names and unique", () => {
+    for (const name of ALL_TOOLS) expect(name).toMatch(/^[a-z][a-z0-9_]{0,63}$/);
+    expect(new Set(ALL_TOOLS).size).toBe(ALL_TOOLS.length);
   });
 });

@@ -1,4 +1,4 @@
-import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
+import type { PluginAgentPanelProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTabState, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -14,7 +14,7 @@ import {
 } from "react-native";
 import { z } from "zod";
 import { withAlpha } from "../shared/color";
-import { buildAgentForest, canArchive, canDismiss, dismissibleIds, titleParts, type AgentNode } from "../shared/agent-tree";
+import { buildAgentForest, canArchive, canDismiss, dismissibleIds, sessionForest, sessionMembers, sessionRootOf, titleParts, workspaceForest, type AgentNode } from "../shared/agent-tree";
 import {
   DASHBOARD_DENSITIES,
   DEFAULT_DENSITY,
@@ -22,7 +22,8 @@ import {
   type DashboardDensityLayout,
 } from "../shared/dashboard-density";
 import { providerIcon } from "../shared/provider-icons";
-import { teamRosterRpc } from "../shared/rpc";
+import { TEAM_MODES, type TeamMode } from "../shared/modes";
+import { teamRosterRpc, teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
 import {
   applySubagentUpdate,
   mergeSubagents,
@@ -31,6 +32,7 @@ import {
   type ProviderSubagent,
 } from "../shared/subagents";
 import { messages } from "./i18n";
+import { COMPONENT_PAGES, ComponentDetail, RunOverview, type ComponentPage } from "./RunComponents";
 
 const RED = "#ff5a5f";
 const GLOW = "#ff9a9d";
@@ -39,8 +41,12 @@ const stateSchema = z.object({
   showClosed: z.boolean(),
   dismissed: z.array(z.string()).catch([]),
   density: z.enum(DASHBOARD_DENSITIES).catch(DEFAULT_DENSITY),
+  /** The session picked in a workspace dashboard; null shows every session of the workspace. */
+  session: z.string().nullable().catch(null),
+  /** A component page of the session's run, opened from the data-flow diagram; null shows the overview. */
+  page: z.string().nullable().catch(null),
 });
-const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY };
+const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY, session: null as string | null, page: null as string | null };
 
 type Colors = PluginWorkspacePanelProps["theme"]["colors"];
 type TreeProps = {
@@ -1171,11 +1177,42 @@ function AnimationAnchor({ value }: { value: Animated.Value }) {
   );
 }
 
+type DashboardProps = Pick<PluginWorkspacePanelProps, "theme" | "layout" | "navigation" | "workspaceId" | "tab"> & {
+  /** The session the dashboard was opened from; null for the workspace's dashboard. */
+  sessionAgentId: string | null;
+};
+
+/** The workspace's sessions, with a picker to narrow it to one session. */
 export function AgentDashboard(props: PluginWorkspacePanelProps) {
+  return <Dashboard {...props} sessionAgentId={null} />;
+}
+
+/** One session: the agent it was opened from, the agents above and below it, and its collaboration run. */
+export function SessionDashboard(props: PluginAgentPanelProps) {
+  return <Dashboard {...props} sessionAgentId={props.params.agentId} />;
+}
+
+
+function Chip({ label, selected, colors, onPress, disabled }: { label: string; selected: boolean; colors: Colors; onPress(): void; disabled?: boolean }) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={{ paddingHorizontal: 9, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: selected ? colors.accent : colors.border, backgroundColor: selected ? colors.accent : colors.surface1, maxWidth: 200, opacity: disabled && !selected ? 0.4 : 1 }}
+    >
+      <Text numberOfLines={1} style={{ color: selected ? colors.accentForeground : colors.foreground, fontSize: 12, fontWeight: selected ? "700" : "500" }}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function Dashboard(props: DashboardProps) {
   const paseo = usePaseo();
   const client = useQueryClient();
   const { t } = useTranslation(messages);
   const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
+  const sessionId = props.sessionAgentId ?? state.session;
   const archived = useMutation({
     mutationFn: (id: string) => paseo.agents.ref(id).archive(),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["dashboard", "agents"] }),
@@ -1246,7 +1283,10 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
         { queryKey: ["dashboard", key] },
         { cancelRefetch: false },
       );
-    const refreshAgents = coalesce(() => invalidate("agents"));
+    const refreshAgents = coalesce(() => {
+      invalidate("agents");
+      invalidate("session");
+    });
     const refreshWorkspaces = coalesce(() => {
       invalidate("workspaces");
       invalidate("roster");
@@ -1337,13 +1377,19 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
       ? entries.filter((w) => w.projectId === projectId).map((w) => w.id)
       : [];
   }, [workspaces.data, props.workspaceId]);
+  // Sub-agents are read from each scoped agent's timeline, so only the shown session or workspace costs requests.
   const unarchivedIds = useMemo(() => {
-    const scope = new Set(workspaceIds);
-    return (agents.data?.entries ?? [])
-      .map((entry) => entry.agent)
-      .filter((agent) => scope.has(agent.workspaceId ?? "") && !agent.archivedAt)
+    const raw = (agents.data?.entries ?? []).map((entry) => entry.agent);
+    const roots = sessionId
+      ? [sessionRootOf(raw, sessionId)]
+      : raw.filter((agent) => agent.workspaceId === props.workspaceId).map((agent) => agent.id);
+    const scope = new Set<string>();
+    for (const root of roots) for (const id of sessionMembers(raw, root)) scope.add(id);
+    const project = new Set(workspaceIds);
+    return raw
+      .filter((agent) => scope.has(agent.id) && project.has(agent.workspaceId ?? "") && !agent.archivedAt)
       .map((agent) => agent.id);
-  }, [agents.data, workspaceIds]);
+  }, [agents.data, workspaceIds, sessionId, props.workspaceId]);
   const subagents = useQuery({
     queryKey: ["dashboard", "subagents", unarchivedIds],
     queryFn: async () => {
@@ -1360,25 +1406,56 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
       );
     },
   });
-  const forest = useMemo(() => {
+  const allAgents = useMemo(() => {
     const parentAgents =
       agents.data?.entries.map((entry) => entry.agent) ?? [];
     const merged = mergeSubagents(subagents.data ?? [], live);
-    return buildAgentForest(
-      [...parentAgents, ...subagentAgents(merged, parentAgents)],
-      workspaceIds,
-      { ...state, defaultEfforts, roster: roster.data?.teams },
-    );
-  }, [
-    agents.data,
-    subagents.data,
-    live,
-    workspaceIds,
-    state,
-    defaultEfforts,
-    roster.data,
-  ]);
+    return [...parentAgents, ...subagentAgents(merged, parentAgents)];
+  }, [agents.data, subagents.data, live]);
+  const fullForest = useMemo(
+    () =>
+      buildAgentForest(allAgents, workspaceIds, {
+        ...state,
+        defaultEfforts,
+        roster: roster.data?.teams,
+      }),
+    [allAgents, workspaceIds, state, defaultEfforts, roster.data],
+  );
+  // The workspace's own sessions: trees whose root runs here, with the agents they started anywhere in the project.
+  const workspaceSessions = useMemo(
+    () => workspaceForest(fullForest, props.workspaceId),
+    [fullForest, props.workspaceId],
+  );
+  const forest = useMemo(
+    () =>
+      sessionId
+        ? sessionForest(fullForest, allAgents, sessionId)
+        : workspaceSessions,
+    [fullForest, allAgents, sessionId, workspaceSessions],
+  );
+  const sessionRoot = useMemo(
+    () => (sessionId ? sessionRootOf(allAgents, sessionId) : null),
+    [allAgents, sessionId],
+  );
+  const readSession = useRpc(teamSessionRpc);
+  const session = useQuery({
+    queryKey: ["dashboard", "session", sessionRoot],
+    queryFn: () => readSession({ agentId: sessionRoot! }),
+    enabled: sessionRoot !== null,
+    refetchInterval: (query) => (query.state.data?.run?.status === "active" || query.state.data?.pendingBrief ? 3000 : false),
+  });
+  const switchMode = useRpc(teamSessionModeRpc);
+  const modeSwitch = useMutation({
+    mutationFn: (mode: TeamMode) => switchMode({ agentId: session.data?.leadAgentId ?? sessionRoot!, mode }),
+    onSuccess: () => void client.invalidateQueries({ queryKey: ["dashboard", "session"] }),
+  });
+  const rosterModes = useMemo(
+    () => new Map((roster.data?.teams ?? []).map((team) => [team.orchestratorWorkspaceId, team.mode])),
+    [roster.data],
+  );
   const closedIds = dismissibleIds(forest);
+  const page = sessionRoot && state.page && (COMPONENT_PAGES as readonly string[]).includes(state.page) ? (state.page as ComponentPage) : null;
+  const openPage = (next: ComponentPage | null) => setState({ ...state, page: next });
   const icons = useMemo(
     () =>
       new Map(
@@ -1428,7 +1505,10 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
     caption: (node: AgentNode) =>
       node.role ||
       (node.kind === "orchestrator"
-        ? t("orchestrator")
+        ? (() => {
+            const mode = (node.agent.id === session.data?.leadAgentId ? session.data?.effective : null) ?? rosterModes.get(node.agent.workspaceId ?? null);
+            return mode && (TEAM_MODES as readonly string[]).includes(mode) ? `${t("orchestrator")} · ${t(`mode.${mode as TeamMode}`)}` : t("orchestrator");
+          })()
         : node.kind === "planner"
           ? t("planner")
           : node.kind === "subagent"
@@ -1471,7 +1551,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
         <Text
           style={{ color: colors.foreground, fontSize: 18, fontWeight: "700" }}
         >
-          {t("dashboardTitle")}
+          {props.sessionAgentId ? t("session.title") : t("dashboardTitle")}
         </Text>
         <View
           style={{
@@ -1592,6 +1672,35 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
             </Pressable>
           ) : null}
       </View>
+      {!props.sessionAgentId && (state.session !== null || [...workspaceSessions.trees, ...workspaceSessions.solo].length > 1) ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingHorizontal: pad, paddingTop: 10 }}>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginRight: 2 }}>{t("session.scopeLabel")}</Text>
+          <Chip label={t("session.allSessions")} selected={state.session === null} colors={colors} onPress={() => setState({ ...state, session: null, page: null })} />
+          {[...workspaceSessions.trees, ...workspaceSessions.solo].map((node) => (
+            <Chip key={node.agent.id} label={node.role || node.title} selected={state.session === node.agent.id} colors={colors} onPress={() => setState({ ...state, session: node.agent.id, page: null })} />
+          ))}
+        </View>
+      ) : null}
+      {session.data?.leadAgentId && session.data.configured && session.data.effective ? (
+        <View style={{ gap: 4, paddingHorizontal: pad, paddingTop: 10 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginRight: 2 }}>{t("mode.label")}</Text>
+            {TEAM_MODES.map((mode) => (
+              <Chip key={mode} label={t(`mode.${mode}`)} selected={session.data?.effective === mode} disabled={session.data?.locked != null} colors={colors} onPress={() => { if (!modeSwitch.isPending && !session.data?.locked) modeSwitch.mutate(mode); }} />
+            ))}
+            {session.data.locked ? <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>🔒</Text> : session.data.override === null ? <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{t("mode.fromFile")}</Text> : null}
+          </View>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{session.data.locked ? t("mode.lockedHint", { mode: t(`mode.${session.data.locked}`) }) : t(`mode.${session.data.effective}Hint`)}</Text>
+          {modeSwitch.error || (modeSwitch.data && !modeSwitch.data.ok) ? (
+            <Text style={{ color: colors.statusDanger, fontSize: 11 }}>{t("mode.switchFailed", { error: modeSwitch.error ? String(modeSwitch.error) : modeSwitch.data && !modeSwitch.data.ok ? modeSwitch.data.errors.join("; ") : "" })}</Text>
+          ) : null}
+        </View>
+      ) : null}
+      {page && sessionRoot ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
+          <ComponentDetail page={page} sessionAgentId={sessionRoot} colors={colors} t={t} onBack={() => openPage(null)} onOpen={openPage} />
+        </ScrollView>
+      ) : (
       <ScrollView
         horizontal
         style={{ flex: 1 }}
@@ -1613,7 +1722,7 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
             </Text>
           ) : !forest.trees.length && !forest.solo.length ? (
             <Text style={{ color: colors.foregroundMuted }}>
-              {t("emptyDashboard")}
+              {sessionId ? t("emptySession") : t("emptyWorkspace")}
             </Text>
           ) : (
             <>
@@ -1667,8 +1776,24 @@ export function AgentDashboard(props: PluginWorkspacePanelProps) {
               )}
             </>
           )}
+          {session.data?.run || session.data?.pendingBrief ? (
+            <RunOverview
+              run={session.data.run}
+              roles={session.data.roles}
+              pending={session.data.pendingBrief}
+              leadAgentId={session.data.leadAgentId}
+              colors={colors}
+              t={t}
+              openAgent={treeProps.open}
+              onOpen={openPage}
+              width={panelWidth > 0 ? Math.max(0, panelWidth - pad * 2) : undefined}
+            />
+          ) : session.data?.leadAgentId ? (
+            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("session.noRun")}</Text>
+          ) : null}
         </ScrollView>
       </ScrollView>
+      )}
     </View>
   );
 }

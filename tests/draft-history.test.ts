@@ -4,6 +4,8 @@ import type { Team } from "../shared/team";
 
 const draft = (goal: string): Team => ({
   version: 1,
+  mode: "delegation",
+  candidates: [],
   goal,
   orchestrator: { workspace: "lead", provider: "claude", model: "m" },
   roles: [{ name: "qa", provider: "claude", model: "m", folders: [], instructions: "" }],

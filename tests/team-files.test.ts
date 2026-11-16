@@ -4,6 +4,8 @@ import { legacyWorkspacesOf, teamFileFor, teamFileWorkspaces, teamIn, workspaceC
 
 const team = (workspace: string, roles: { name: string }[]): Team => ({
   version: 1,
+  mode: "delegation",
+  candidates: [],
   goal: "",
   orchestrator: { workspace, provider: "claude", model: "claude-opus-5-5" },
   roles: roles.map((role) => ({ ...role, provider: "claude", model: "claude-sonnet-5-5", folders: [], instructions: "" })),

@@ -4,6 +4,8 @@ import { parseTeam, serializeTeam, type Team } from "../shared/team";
 const team: Team = {
   version: 1,
   goal: "2D platformer game",
+  mode: "team",
+  candidates: [],
   orchestrator: { workspace: "orchestrator", provider: "claude", model: "claude-opus-5-5" },
   roles: [
     { name: "design", provider: "codex", model: "gpt-6.1-sol", folders: ["src/ui"], instructions: "UI and art" },
@@ -27,6 +29,22 @@ describe("parseTeam", () => {
     );
     expect(result.ok && result.team.roles[0]).toEqual({ name: "design", provider: "codex", model: "gpt-6.1-sol", folders: [], instructions: "" });
     expect(result.ok && result.team.goal).toBe("");
+  });
+
+  it("reads a file written before modes existed as a delegation team", () => {
+    const result = parseTeam(JSON.stringify({ version: 1, orchestrator: { workspace: "lead", provider: "claude", model: "m" }, roles: [{ name: "a", provider: "codex", model: "x" }] }));
+    expect(result.ok && result.team.mode).toBe("delegation");
+  });
+
+  it("names a candidate without a name after its model, in a team file too", () => {
+    const result = parseTeam(JSON.stringify({ version: 1, orchestrator: { workspace: "w", provider: "claude", model: "m" }, candidates: [{ provider: "claude", model: "claude-opus-5-5", notes: "Do not give it: tests" }] }));
+    expect(result.ok && result.team.candidates).toEqual([{ name: "opus-5-5", provider: "claude", model: "claude-opus-5-5", notes: "Do not give it: tests" }]);
+  });
+
+  it("accepts every collaboration mode and rejects an unknown one", () => {
+    for (const mode of ["auto", "team", "delegation"]) expect(parseTeam(JSON.stringify({ ...team, mode })).ok).toBe(true);
+    const result = parseTeam(JSON.stringify({ ...team, mode: "swarm" }));
+    expect(!result.ok && result.errors.join(" ")).toMatch(/mode/);
   });
 
   it("rejects text that is not JSON", () => {
