@@ -6,7 +6,7 @@ import { useRpc, useTranslation } from "@getpaseo/plugin/client";
 import { Icon, Loading } from "@getpaseo/plugin/client/ui";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Animated, Easing, Platform, Pressable, Text, View } from "react-native";
+import { Animated, Easing, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { withAlpha } from "../shared/color";
 import { componentsOf, flowTotals, RUN_COMPONENTS, type RunComponent } from "../shared/flow";
 import { teamSessionDetailRpc, type teamSessionRpc } from "../shared/rpc";
@@ -136,6 +136,50 @@ function LiveDot({ color }: { color: string }) {
     return () => animation.stop();
   }, [pulse]);
   return <Animated.View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: color, opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }) }} />;
+}
+
+/** A tab of the session dashboard: the overview, the agents, a component of the mode, or the whole data flow. */
+export type SessionTab = "overview" | "agents" | ComponentPage;
+
+/** The session dashboard's tabs: overview and agents, then the mode's components and the whole data flow. */
+export function SessionTabs({ mode, tab, run, pending, colors, t, onOpen }: { mode: RunView["mode"]; tab: SessionTab; run: RunView | null; pending: boolean; colors: Colors; t: T; onOpen(tab: SessionTab): void }) {
+  const count = (component: RunComponent): number | null => {
+    if (!run) return null;
+    if (component === "tasks" || component === "split") return run.tasks.length || null;
+    if (component === "board") return run.postCount || null;
+    if (component === "claims") return run.claims.length || null;
+    if (component === "contexts" || component === "reports") return run.members.length || null;
+    return null;
+  };
+  const tabs: { id: SessionTab; label: string; icon: string; color?: string; badge?: number | null; dot?: boolean }[] = [
+    { id: "overview", label: t("session.tabs.overview"), icon: "LayoutDashboard" },
+    { id: "agents", label: t("session.tabs.agents"), icon: "Network" },
+    ...componentsOf(mode).map((component) => ({ id: component, label: componentName(component, mode, t), icon: COMPONENT_ICON[component], color: COMPONENT_COLOR[component], badge: count(component), dot: component === "brief" && pending })),
+    { id: "flow", label: t("flow.title"), icon: "Activity", badge: run?.events.length || null },
+  ];
+  return (
+    <View style={{ borderBottomWidth: 1, borderColor: colors.border }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 2 }}>
+      {tabs.map((entry) => {
+        const selected = entry.id === tab;
+        return (
+          <Pressable
+            key={entry.id}
+            accessibilityRole="tab"
+            accessibilityState={{ selected }}
+            onPress={() => onOpen(entry.id)}
+            style={(state) => ({ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 7, marginBottom: -1, borderBottomWidth: 2, borderColor: selected ? entry.color ?? colors.accent : "transparent", backgroundColor: (state as { hovered?: boolean }).hovered && !selected ? colors.surface1 : "transparent", borderTopLeftRadius: 6, borderTopRightRadius: 6 })}
+          >
+            <Icon name={entry.icon} size={13} color={selected ? entry.color ?? colors.foreground : colors.foregroundMuted} />
+            <Text numberOfLines={1} style={{ color: selected ? colors.foreground : colors.foregroundMuted, fontSize: 12, fontWeight: selected ? "700" : "500" }}>{entry.label}</Text>
+            {entry.badge ? <Text style={{ color: colors.foregroundMuted, fontSize: 10, paddingHorizontal: 5, borderRadius: 8, backgroundColor: colors.surface2, fontVariant: ["tabular-nums"] }}>{entry.badge}</Text> : null}
+            {entry.dot ? <LiveDot color={COMPONENT_COLOR.brief} /> : null}
+          </Pressable>
+        );
+      })}
+      </ScrollView>
+    </View>
+  );
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -433,6 +477,65 @@ function SectionTitle({ colors, children }: { colors: Colors; children: ReactNod
   return <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontWeight: "700", textTransform: "uppercase", letterSpacing: 1 }}>{children}</Text>;
 }
 
+const MODE_COLOR = { team: "#34d399", delegation: "#818cf8" } as const;
+
+function Pill({ label, color, colors }: { label: string; color: string; colors: Colors }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, borderWidth: 1, borderColor: withAlpha(color, 0.45), backgroundColor: withAlpha(color, 0.12) }}>
+      <Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "600" }}>{label}</Text>
+    </View>
+  );
+}
+
+function StatTile({ label, value, hint, color, colors, progress }: { label: string; value: string; hint?: string; color: string; colors: Colors; progress?: number }) {
+  return (
+    <View style={{ flexGrow: 1, flexBasis: 96, minWidth: 96, gap: 2, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.surface2 }}>
+      <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10, fontWeight: "700", textTransform: "uppercase", letterSpacing: 0.8 }}>{label}</Text>
+      <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 17, fontWeight: "700", fontVariant: ["tabular-nums"] }}>{value}</Text>
+      {progress !== undefined ? (
+        <View style={{ height: 3, borderRadius: 2, backgroundColor: withAlpha(color, 0.18), overflow: "hidden" }}>
+          <View style={{ width: `${Math.round(progress * 100)}%`, height: 3, backgroundColor: color }} />
+        </View>
+      ) : null}
+      {hint ? <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10 }}>{hint}</Text> : null}
+    </View>
+  );
+}
+
+/** The run at a glance: its title, mode and state, and a row of numbers. */
+function RunHeader({ run, colors, t, now }: { run: RunView; colors: Colors; t: T; now: number }) {
+  const live = run.tasks.filter((task) => task.state !== "dropped");
+  const done = live.filter((task) => task.state === "done").length;
+  const active = run.members.filter((member) => !member.retired);
+  const working = active.filter((member) => member.state === "working" || member.state === "attention").length;
+  const elapsed = (run.status === "active" ? now : Date.parse(run.updatedAt)) - Date.parse(run.createdAt);
+  const modeColor = MODE_COLOR[run.mode];
+  return (
+    <View style={{ gap: 10 }}>
+      <View style={{ gap: 6 }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+          <Pill label={`${t(`mode.${run.mode}`)} · ${run.mode === "team" ? "MA-08" : "MA-04"}`} color={modeColor} colors={colors} />
+          <Pill label={run.status === "active" ? t("session.status.active") : t("session.status.closed")} color={run.status === "active" ? AMBER : colors.foregroundMuted} colors={colors} />
+          <Pill label={run.mode === "team" ? t("session.round", { round: run.round, rounds: run.rounds }) : t("session.batch", { round: run.round })} color={colors.foregroundMuted} colors={colors} />
+          {run.planApproval ? <Pill label={t("session.planApprovalOn")} color={COMPONENT_COLOR.plans} colors={colors} /> : null}
+          <Text style={{ marginLeft: "auto", color: colors.foregroundMuted, fontSize: 11, fontFamily: Platform.OS === "web" ? "monospace" : undefined }}>{run.id}</Text>
+        </View>
+        <Text numberOfLines={2} style={{ color: colors.foreground, fontSize: 16, fontWeight: "700" }}>{run.title}</Text>
+      </View>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        <StatTile label={run.mode === "team" ? t("session.stat.tasks") : t("session.stat.packets")} value={`${done}/${live.length}`} hint={t("session.stat.ofDone", { done, total: live.length })} color={COMPONENT_COLOR.tasks} colors={colors} progress={live.length ? done / live.length : 0} />
+        <StatTile label={t("session.stat.members")} value={String(active.length)} hint={working ? t("session.stat.working", { count: working }) : t("session.stat.idle")} color={AMBER} colors={colors} />
+        {run.mode === "team" ? (
+          <StatTile label={t("session.stat.posts")} value={String(run.postCount)} hint={run.claims.length ? t("flow.summary.claims", { count: run.claims.length }) : t("flow.summary.claimsNone")} color={COMPONENT_COLOR.board} colors={colors} />
+        ) : (
+          <StatTile label={t("session.stat.batches")} value={String(run.batches.length)} hint={run.batches.at(-1)?.summarized ? t("flow.summary.summarized", { round: run.batches.at(-1)!.round }) : t("flow.summary.summaryNone")} color={COMPONENT_COLOR.split} colors={colors} />
+        )}
+        <StatTile label={t("session.stat.time")} value={durationText(elapsed, t)} hint={run.status === "active" ? t("session.stat.running") : t("session.stat.took")} color={colors.accent} colors={colors} />
+      </View>
+    </View>
+  );
+}
+
 /** The run on the dashboard: its members, the data-flow diagram with the mode's components, and the latest flows. */
 export function RunOverview({ run, roles, pending, leadAgentId, colors, width, t, openAgent, onOpen }: { run: RunView | null; roles: SessionInfo["roles"]; pending: SessionInfo["pendingBrief"]; leadAgentId: string | null; colors: Colors; width: number | undefined; t: T; openAgent?: (id: string) => void; onOpen(page: ComponentPage): void }) {
   const now = useNow();
@@ -453,14 +556,7 @@ export function RunOverview({ run, roles, pending, leadAgentId, colors, width, t
   const latest = [...run.events].reverse().slice(0, 8);
   return (
     <View style={card}>
-      <View style={{ gap: 2 }}>
-        <Text numberOfLines={2} style={{ color: colors.foreground, fontSize: 14, fontWeight: "700" }}>{t("session.runTitle", { id: run.id, title: run.title })}</Text>
-        <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-          {t(`mode.${run.mode}`)} · {run.mode === "team" ? t("session.round", { round: run.round, rounds: run.rounds }) : t("session.batch", { round: run.round })}
-          {run.planApproval ? ` · ${t("session.planApprovalOn")}` : ""}
-          {run.status === "closed" ? ` · ${t("session.closed")}` : ""}
-        </Text>
-      </View>
+      <RunHeader run={run} colors={colors} t={t} now={now} />
       {intake}
       {roles.length ? (
         <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{t("session.formedRoles")}: {roles.map((role) => `${role.name} → ${role.candidate} (${role.model})`).join(" · ")}</Text>
@@ -519,15 +615,19 @@ function Usage({ events, members, colors, t }: { events: readonly FlowEvent[]; m
       <SectionTitle colors={colors}>{t("flow.usage")}</SectionTitle>
       {totals.map((row) => (
         <View key={row.party} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Text numberOfLines={1} style={{ width: 110, color: colors.foreground, fontSize: 12 }}>{partyName(row.party, members, t)}</Text>
-          <View style={{ flex: 1, gap: 2 }}>
+          <Text numberOfLines={1} style={{ width: "34%", maxWidth: 140, color: colors.foreground, fontSize: 12 }}>{partyName(row.party, members, t)}</Text>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <View style={{ height: 5, borderRadius: 3, width: `${Math.max(2, (row.wrote / max) * 70)}%`, backgroundColor: row.wrote ? colors.accent : colors.surface2 }} />
-              <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>→ {t("flow.wrote", { count: row.wrote })}</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={{ height: 5, borderRadius: 3, width: `${Math.max(3, (row.wrote / max) * 100)}%`, backgroundColor: row.wrote ? colors.accent : colors.surface2 }} />
+              </View>
+              <Text numberOfLines={1} style={{ width: 82, color: colors.foregroundMuted, fontSize: 10 }}>→ {t("flow.wrote", { count: row.wrote })}</Text>
             </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <View style={{ height: 5, borderRadius: 3, width: `${Math.max(2, (row.got / max) * 70)}%`, backgroundColor: row.got ? colors.statusSuccess : colors.surface2 }} />
-              <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>← {t("flow.got", { count: row.got })}</Text>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <View style={{ height: 5, borderRadius: 3, width: `${Math.max(3, (row.got / max) * 100)}%`, backgroundColor: row.got ? colors.statusSuccess : colors.surface2 }} />
+              </View>
+              <Text numberOfLines={1} style={{ width: 82, color: colors.foregroundMuted, fontSize: 10 }}>← {t("flow.got", { count: row.got })}</Text>
             </View>
           </View>
         </View>
@@ -553,82 +653,112 @@ function History({ events, members, mode, colors, t, now, title }: { events: rea
   );
 }
 
-const TASK_FILTERS = ["all", "doing", "todo", "done", "dropped"] as const;
 const taskDot = (state: DetailRun["tasks"][number]["state"], colors: Colors) => (state === "doing" ? AMBER : state === "done" ? colors.statusSuccess : state === "dropped" ? colors.foregroundMuted : COMPONENT_COLOR.tasks);
 
-function TasksPage({ run, colors, t, now }: { run: DetailRun; colors: Colors; t: T; now: number }) {
-  const [filter, setFilter] = useState<(typeof TASK_FILTERS)[number]>("all");
-  const [role, setRole] = useState<string | null>(null);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
-  const roles = [...new Set(run.tasks.map((task) => task.role ?? ""))];
-  const tasks = run.tasks.filter((task) => (filter === "all" || task.state === filter) && (role === null || (task.role ?? "") === role));
+const BOARD_COLUMNS = ["todo", "doing", "done", "dropped"] as const;
+type BoardTask = DetailRun["tasks"][number];
+
+/** A task on the board: id, title and who has it, with badges for what waits on it; tap for everything else. */
+function TaskCard({ task, run, colors, t, now, expanded, onToggle }: { task: BoardTask; run: DetailRun; colors: Colors; t: T; now: number; expanded: boolean; onToggle(): void }) {
+  const history = run.events.filter((event) => (event.component === "tasks" || event.component === "plans") && event.subject === task.id);
+  const badges: { label: string; color: string }[] = [];
+  if (task.waitingOn.length) badges.push({ label: t("session.waitsFor", { ids: task.waitingOn.join(", ") }), color: colors.foregroundMuted });
+  if (task.plan) badges.push({ label: task.plan.status === "pending" ? t("session.planPending") : task.plan.status === "approved" ? t("session.planApproved") : t("session.planRejected"), color: task.plan.status === "approved" ? colors.statusSuccess : task.plan.status === "pending" ? COMPONENT_COLOR.plans : RED });
+  if (task.feedback && task.state !== "done") badges.push({ label: t("session.sentBack"), color: RED });
   return (
-    <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {TASK_FILTERS.map((option) => (
-          <Chip key={option} label={`${t(`flow.tasks.filter.${option}`)} ${option === "all" ? run.tasks.length : run.tasks.filter((task) => task.state === option).length}`} selected={filter === option} colors={colors} color={COMPONENT_COLOR.tasks} onPress={() => setFilter(option)} />
-        ))}
-      </View>
-      {roles.length > 1 ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          <Chip label={t("flow.filterAll")} selected={role === null} colors={colors} onPress={() => setRole(null)} />
-          {roles.map((entry) => <Chip key={entry} label={entry || t("session.anyone")} selected={role === entry} colors={colors} onPress={() => setRole(entry)} />)}
+    <View style={{ borderRadius: 8, borderWidth: 1, borderColor: expanded ? withAlpha(taskDot(task.state, colors), 0.6) : colors.border, backgroundColor: colors.surface1, opacity: task.state === "dropped" ? 0.6 : 1 }}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={onToggle} style={{ gap: 5, padding: 9 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Text style={{ color: taskDot(task.state, colors), fontSize: 11, fontWeight: "800", fontFamily: Platform.OS === "web" ? "monospace" : undefined }}>{task.id}</Text>
+          {task.role ? <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 10, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, backgroundColor: colors.surface2 }}>{task.role}</Text> : null}
+          <View style={{ flex: 1 }} />
+          <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={13} color={colors.foregroundMuted} />
+        </View>
+        <Text numberOfLines={expanded ? undefined : 3} style={{ color: colors.foreground, fontSize: 12, lineHeight: 17 }}>{task.title}</Text>
+        {badges.length ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }}>
+            {badges.map((badge) => <Text key={badge.label} style={{ color: badge.color, fontSize: 10, fontWeight: "600", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, borderWidth: 1, borderColor: withAlpha(badge.color, 0.4) }}>{badge.label}</Text>)}
+          </View>
+        ) : null}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <View style={{ width: 16, height: 16, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: task.ownerTitle ? withAlpha(AMBER, 0.2) : colors.surface2 }}>
+            <Text style={{ color: colors.foreground, fontSize: 9, fontWeight: "700" }}>{(task.ownerTitle ?? "·").charAt(0).toUpperCase()}</Text>
+          </View>
+          <Text numberOfLines={1} style={{ flex: 1, color: colors.foregroundMuted, fontSize: 10 }}>{task.ownerTitle ?? t("session.anyone")}</Text>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>{agoText(task.updatedAt, now, t)}</Text>
+        </View>
+      </Pressable>
+      {expanded ? (
+        <View style={{ gap: 8, paddingHorizontal: 9, paddingBottom: 10, borderTopWidth: 1, borderColor: colors.border, paddingTop: 8 }}>
+          {task.detail ? <Field label={t("flow.details")} colors={colors}>{task.detail}</Field> : null}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 14 }}>
+            <Field label={t("flow.tasks.createdBy")} colors={colors}>{task.createdBy === "lead" ? t("flow.lead") : task.createdBy}</Field>
+            {task.deps.length ? <Field label={t("flow.tasks.waitsFor")} colors={colors}>{task.deps.map((dep) => `${dep}${task.waitingOn.includes(dep) ? " ⏳" : " ✓"}`).join(", ")}</Field> : null}
+          </View>
+          {task.files.length ? <Field label={t("flow.tasks.files")} colors={colors}>{task.files.join(", ")}</Field> : null}
+          {task.plan ? (
+            <Field label={`${t("flow.tasks.plan")} · ${task.plan.status === "pending" ? t("flow.plans.pending") : task.plan.status === "approved" ? t("flow.plans.approved") : t("flow.plans.rejected")}`} colors={colors}>
+              <View style={{ gap: 2 }}>
+                <Text selectable style={{ color: colors.foreground, fontSize: 12 }}>{task.plan.text}</Text>
+                {task.plan.feedback ? <Text selectable style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("flow.lead")}: {task.plan.feedback}</Text> : null}
+              </View>
+            </Field>
+          ) : null}
+          {task.result ? <Field label={t("flow.tasks.result")} colors={colors}>{task.result}</Field> : null}
+          {task.feedback ? <Field label={t("flow.tasks.feedback")} colors={colors}>{task.feedback}</Field> : null}
+          {history.length ? (
+            <Field label={t("flow.history")} colors={colors}>
+              <View style={{ gap: 4 }}>{[...history].reverse().map((event) => <EventRow key={event.seq} event={event} members={run.members} mode={run.mode} colors={colors} t={t} now={now} />)}</View>
+            </Field>
+          ) : null}
         </View>
       ) : null}
-      {!tasks.length ? <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("flow.tasks.none")}</Text> : null}
-      {tasks.map((task) => {
-        const expanded = open[task.id] ?? false;
-        const history = run.events.filter((event) => (event.component === "tasks" || event.component === "plans") && event.subject === task.id);
-        return (
-          <View key={task.id} style={[box(colors), { opacity: task.state === "dropped" ? 0.6 : 1 }]}>
-            <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setOpen((current) => ({ ...current, [task.id]: !expanded }))} style={{ gap: 3 }}>
-              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6 }}>
-                <View style={{ width: 8, height: 8, borderRadius: 4, marginTop: 4, backgroundColor: taskDot(task.state, colors) }} />
-                <Text style={{ flex: 1, minWidth: 0, color: colors.foreground, fontSize: 13 }}><Text style={{ fontWeight: "700" }}>{task.id}</Text> {task.title}</Text>
-                <Icon name={expanded ? "ChevronDown" : "ChevronRight"} size={14} color={colors.foregroundMuted} />
-              </View>
-              <Text numberOfLines={2} style={{ color: colors.foregroundMuted, fontSize: 11, paddingLeft: 14 }}>
-                {[
-                  t(`flow.tasks.filter.${task.state}`),
-                  task.role ?? t("session.anyone"),
-                  task.ownerTitle,
-                  task.waitingOn.length ? t("session.waitsFor", { ids: task.waitingOn.join(", ") }) : null,
-                  task.plan ? (task.plan.status === "pending" ? t("session.planPending") : task.plan.status === "approved" ? t("session.planApproved") : t("session.planRejected")) : null,
-                  task.feedback && task.state !== "done" ? t("session.sentBack") : null,
-                  t("flow.tasks.updated", { ago: agoText(task.updatedAt, now, t) }),
-                ].filter(Boolean).join(" · ")}
-              </Text>
-            </Pressable>
-            {expanded ? (
-              <View style={{ gap: 8, paddingLeft: 14, paddingTop: 4 }}>
-                {task.detail ? <Field label={t("flow.details")} colors={colors}>{task.detail}</Field> : null}
-                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 16 }}>
-                  <Field label={t("flow.tasks.role")} colors={colors}>{task.role ?? t("session.anyone")}</Field>
-                  <Field label={t("flow.tasks.owner")} colors={colors}>{task.ownerTitle ?? "-"}</Field>
-                  <Field label={t("flow.tasks.createdBy")} colors={colors}>{task.createdBy === "lead" ? t("flow.lead") : task.createdBy}</Field>
-                  {task.deps.length ? <Field label={t("flow.tasks.waitsFor")} colors={colors}>{task.deps.map((dep) => `${dep}${task.waitingOn.includes(dep) ? " ⏳" : " ✓"}`).join(", ")}</Field> : null}
+    </View>
+  );
+}
+
+/** The shared task board as a Kanban: one column per state when there is room, stacked sections in a narrow panel. */
+function TasksPage({ run, colors, t, now }: { run: DetailRun; colors: Colors; t: T; now: number }) {
+  const [role, setRole] = useState<string | null>(null);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [width, setWidth] = useState(0);
+  const roles = [...new Set(run.tasks.map((task) => task.role ?? ""))];
+  const tasks = run.tasks.filter((task) => role === null || (task.role ?? "") === role);
+  // Dropped tasks only get a column when there are any.
+  const columns = BOARD_COLUMNS.filter((state) => state !== "dropped" || tasks.some((task) => task.state === "dropped"));
+  const wide = width >= 620;
+  const toggle = (id: string) => setOpen((current) => ({ ...current, [id]: !current[id] }));
+  return (
+    <View style={{ gap: 10 }} onLayout={(event) => {
+      const next = Math.round(event.nativeEvent.layout.width);
+      setWidth((current) => (current === next ? current : next));
+    }}>
+      {roles.length > 1 ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          <Chip label={`${t("flow.filterAll")} ${run.tasks.length}`} selected={role === null} colors={colors} color={COMPONENT_COLOR.tasks} onPress={() => setRole(null)} />
+          {roles.map((entry) => <Chip key={entry} label={`${entry || t("session.anyone")} ${run.tasks.filter((task) => (task.role ?? "") === entry).length}`} selected={role === entry} colors={colors} color={COMPONENT_COLOR.tasks} onPress={() => setRole(entry)} />)}
+        </View>
+      ) : null}
+      {!run.tasks.length ? <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("flow.tasks.none")}</Text> : (
+        <View style={{ flexDirection: wide ? "row" : "column", alignItems: wide ? "flex-start" : "stretch", gap: wide ? 8 : 12 }}>
+          {columns.map((state) => {
+            const column = tasks.filter((task) => task.state === state);
+            const color = taskDot(state, colors);
+            return (
+              <View key={state} style={{ flex: wide ? 1 : undefined, minWidth: 0, gap: 6, padding: wide ? 6 : 0, borderRadius: 10, backgroundColor: wide ? withAlpha(color, 0.06) : "transparent" }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 2 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+                  <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "700" }}>{t(`flow.tasks.filter.${state}`)}</Text>
+                  <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{column.length}</Text>
                 </View>
-                {task.files.length ? <Field label={t("flow.tasks.files")} colors={colors}>{task.files.join(", ")}</Field> : null}
-                {task.plan ? (
-                  <Field label={`${t("flow.tasks.plan")} · ${task.plan.status === "pending" ? t("flow.plans.pending") : task.plan.status === "approved" ? t("flow.plans.approved") : t("flow.plans.rejected")}`} colors={colors}>
-                    <View style={{ gap: 2 }}>
-                      <Text selectable style={{ color: colors.foreground, fontSize: 12 }}>{task.plan.text}</Text>
-                      {task.plan.feedback ? <Text selectable style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("flow.lead")}: {task.plan.feedback}</Text> : null}
-                    </View>
-                  </Field>
-                ) : null}
-                {task.result ? <Field label={t("flow.tasks.result")} colors={colors}>{task.result}</Field> : null}
-                {task.feedback ? <Field label={t("flow.tasks.feedback")} colors={colors}>{task.feedback}</Field> : null}
-                {history.length ? (
-                  <Field label={t("flow.history")} colors={colors}>
-                    <View style={{ gap: 4 }}>{[...history].reverse().map((event) => <EventRow key={event.seq} event={event} members={run.members} mode={run.mode} colors={colors} t={t} now={now} />)}</View>
-                  </Field>
-                ) : null}
+                {column.length ? column.map((task) => <TaskCard key={task.id} task={task} run={run} colors={colors} t={t} now={now} expanded={open[task.id] ?? false} onToggle={() => toggle(task.id)} />) : (
+                  <Text style={{ color: colors.foregroundMuted, fontSize: 11, paddingHorizontal: 2, paddingVertical: 6 }}>—</Text>
+                )}
               </View>
-            ) : null}
-          </View>
-        );
-      })}
+            );
+          })}
+        </View>
+      )}
     </View>
   );
 }
@@ -658,41 +788,72 @@ function PlansPage({ run, colors, t }: { run: DetailRun; colors: Colors; t: T })
   );
 }
 
+const POST_COLOR = (kind: string, colors: Colors) => (kind === "finding" || kind === "question" ? AMBER : kind === "done" ? colors.statusSuccess : kind === "brief" ? COMPONENT_COLOR.brief : kind === "answer" ? COMPONENT_COLOR.board : colors.foregroundMuted);
+const KNOWN_KINDS = ["brief", "update", "finding", "question", "answer", "done", "note"] as const;
+
+/** The team board as a conversation: posts oldest first, grouped by round, the orchestrator's on the right. */
 function BoardPage({ run, colors, t, now }: { run: DetailRun; colors: Colors; t: T; now: number }) {
   const kinds = [...new Set(run.posts.map((post) => post.kind))];
   const [kind, setKind] = useState<string | null>(null);
-  const posts = [...run.posts].reverse().filter((post) => kind === null || post.kind === kind);
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  const posts = run.posts.filter((post) => kind === null || post.kind === kind);
+  const recipient = (to: string) => (to === "lead" ? t("flow.lead") : to);
   const last = run.posts.at(-1)?.seq ?? 0;
   const readers = [{ id: "lead", title: t("flow.lead"), readSeq: run.leadReadSeq }, ...run.members.filter((member) => !member.retired).map((member) => ({ id: member.agentId, title: member.title, readSeq: member.readSeq }))];
+  const kindLabel = (value: string) => ((KNOWN_KINDS as readonly string[]).includes(value) ? t(`flow.board.kind.${value as (typeof KNOWN_KINDS)[number]}`) : value);
   return (
-    <View style={{ gap: 8 }}>
-      <View style={box(colors)}>
+    <View style={{ gap: 10 }}>
+      <View style={[box(colors), { gap: 8 }]}>
         <SectionTitle colors={colors}>{t("flow.board.inbox")}</SectionTitle>
         {readers.map((reader) => (
           <View key={reader.id} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <Text numberOfLines={1} style={{ width: 120, color: colors.foreground, fontSize: 12 }}>{reader.title}</Text>
+            <Text numberOfLines={1} style={{ width: 120, color: colors.foreground, fontSize: 12, fontWeight: reader.id === "lead" ? "700" : "500" }}>{reader.title}</Text>
             <View style={{ flex: 1, height: 5, borderRadius: 3, backgroundColor: colors.surface2, overflow: "hidden" }}>
               <View style={{ width: `${last ? Math.round((Math.min(reader.readSeq, last) / last) * 100) : 0}%`, height: 5, backgroundColor: COMPONENT_COLOR.board }} />
             </View>
-            <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>{t("flow.board.readUpTo", { seq: reader.readSeq })}{last > reader.readSeq ? ` · ${t("flow.board.unread", { count: last - reader.readSeq })}` : ""}</Text>
+            <Text style={{ color: last > reader.readSeq ? AMBER : colors.foregroundMuted, fontSize: 10 }}>{last > reader.readSeq ? t("flow.board.unread", { count: last - reader.readSeq }) : t("flow.board.readUpTo", { seq: reader.readSeq })}</Text>
           </View>
         ))}
       </View>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
         <Chip label={`${t("flow.filterAll")} ${run.posts.length}`} selected={kind === null} colors={colors} color={COMPONENT_COLOR.board} onPress={() => setKind(null)} />
-        {kinds.map((entry) => <Chip key={entry} label={`${entry} ${run.posts.filter((post) => post.kind === entry).length}`} selected={kind === entry} colors={colors} color={COMPONENT_COLOR.board} onPress={() => setKind(entry)} />)}
+        {kinds.map((entry) => <Chip key={entry} label={`${kindLabel(entry)} ${run.posts.filter((post) => post.kind === entry).length}`} selected={kind === entry} colors={colors} color={POST_COLOR(entry, colors)} onPress={() => setKind(entry)} />)}
       </View>
       {!posts.length ? <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("flow.board.none")}</Text> : null}
-      {posts.map((post) => {
-        const author = post.author === "lead" ? t("flow.lead") : run.members.find((member) => member.agentId === post.agentId)?.title ?? post.author;
-        const accent = post.kind === "finding" || post.kind === "question" ? AMBER : post.kind === "done" ? colors.statusSuccess : post.kind === "brief" ? COMPONENT_COLOR.brief : colors.border;
+      {posts.map((post, index) => {
+        const lead = post.author === "lead";
+        const author = lead ? t("flow.lead") : run.members.find((member) => member.agentId === post.agentId)?.title ?? post.author;
+        const accent = POST_COLOR(post.kind, colors);
+        const newRound = index === 0 || posts[index - 1]!.round !== post.round;
         return (
-          <View key={post.seq} style={[box(colors), { borderLeftWidth: 3, borderLeftColor: accent }]}>
-            <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-              #{post.seq} · {author} · {post.kind}{post.to.length ? ` · ${t("flow.board.to", { to: post.to.join(", ") })}` : ""} · {t("session.round", { round: post.round, rounds: run.rounds })} · {agoText(post.at, now, t)}
-            </Text>
-            <Text selectable style={{ color: colors.foreground, fontSize: 12 }}>{post.text}</Text>
-            {post.files.length ? <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{t("flow.tasks.files")}: {post.files.join(", ")}</Text> : null}
+          <View key={post.seq} style={{ gap: 6 }}>
+            {newRound ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 2 }}>
+                <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+                <Text style={{ color: colors.foregroundMuted, fontSize: 10, fontWeight: "700", letterSpacing: 0.6 }}>{t("session.round", { round: post.round, rounds: run.rounds })}</Text>
+                <View style={{ flex: 1, height: 1, backgroundColor: colors.border }} />
+              </View>
+            ) : null}
+            <View style={{ flexDirection: lead ? "row-reverse" : "row", alignItems: "flex-start", gap: 8 }}>
+              <View style={{ width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: lead ? withAlpha(colors.accent, 0.22) : withAlpha(accent, 0.2) }}>
+                <Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "800" }}>{author.charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={{ flexShrink: 1, maxWidth: "88%", gap: 4, padding: 10, borderRadius: 10, borderTopLeftRadius: lead ? 10 : 3, borderTopRightRadius: lead ? 3 : 10, borderWidth: 1, borderColor: withAlpha(accent, 0.35), backgroundColor: lead ? withAlpha(colors.accent, 0.08) : colors.surface1 }}>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                  <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "700" }}>{author}</Text>
+                  <Text style={{ color: accent, fontSize: 10, fontWeight: "700", paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, backgroundColor: withAlpha(accent, 0.14) }}>{kindLabel(post.kind)}</Text>
+                  {post.to.length ? <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>→ {post.to.map(recipient).join(", ")}</Text> : null}
+                  <Text style={{ color: colors.foregroundMuted, fontSize: 10 }}>#{post.seq} · {agoText(post.at, now, t)}</Text>
+                </View>
+                <Text selectable numberOfLines={open[post.seq] || post.text.length < 420 ? undefined : 7} style={{ color: colors.foreground, fontSize: 12, lineHeight: 18 }}>{post.text}</Text>
+                {post.text.length >= 420 ? (
+                  <Pressable accessibilityRole="button" onPress={() => setOpen((current) => ({ ...current, [post.seq]: !current[post.seq] }))} style={{ alignSelf: "flex-start" }}>
+                    <Text style={{ color: colors.accent, fontSize: 11, fontWeight: "600" }}>{open[post.seq] ? t("flow.board.less") : t("flow.board.more")}</Text>
+                  </Pressable>
+                ) : null}
+                {post.files.length ? <Text style={{ color: colors.foregroundMuted, fontSize: 11, fontFamily: Platform.OS === "web" ? "monospace" : undefined }}>{post.files.join(", ")}</Text> : null}
+              </View>
+            </View>
           </View>
         );
       })}
@@ -928,7 +1089,7 @@ function FlowPage({ run, colors, t, now }: { run: DetailRun; colors: Colors; t: 
 }
 
 /** One component of the session's run, full size: what it is, who uses it, its content and its history. */
-export function ComponentDetail({ page, sessionAgentId, colors, t, onBack, onOpen }: { page: ComponentPage; sessionAgentId: string; colors: Colors; t: T; onBack(): void; onOpen(page: ComponentPage): void }) {
+export function ComponentDetail({ page, sessionAgentId, colors, t }: { page: ComponentPage; sessionAgentId: string; colors: Colors; t: T }) {
   const readDetail = useRpc(teamSessionDetailRpc);
   const now = useNow();
   const detail = useQuery({
@@ -941,24 +1102,15 @@ export function ComponentDetail({ page, sessionAgentId, colors, t, onBack, onOpe
   const title = page === "flow" ? t("flow.allTitle") : componentName(page, mode, t);
   const about = page === "flow" ? t("flow.hint") : page === "tasks" && mode === "delegation" ? t("flow.about.delegationTasks") : t(`flow.about.${page}`);
   const events = run ? run.events.filter((event) => page === "flow" || event.component === page) : [];
-  const siblings = run ? componentsOf(run.mode) : [];
   return (
     <View style={{ gap: 12 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t("flow.back")} onPress={onBack} style={{ flexDirection: "row", alignItems: "center", gap: 2, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface1 }}>
-          <Icon name="ChevronLeft" size={14} color={colors.foreground} />
-          <Text style={{ color: colors.foreground, fontSize: 12 }}>{t("flow.back")}</Text>
-        </Pressable>
-        {page === "flow" ? null : <ComponentIcon component={page} size={26} />}
-        <Text numberOfLines={1} style={{ flex: 1, color: colors.foreground, fontSize: 16, fontWeight: "700" }}>{title}</Text>
-      </View>
-      {siblings.length > 1 ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-          {siblings.map((entry) => <Chip key={entry} label={componentName(entry, mode, t)} selected={entry === page} colors={colors} color={COMPONENT_COLOR[entry]} onPress={() => onOpen(entry)} />)}
-          <Chip label={t("flow.title")} selected={page === "flow"} colors={colors} onPress={() => onOpen("flow")} />
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, padding: 12, borderRadius: 10, backgroundColor: page === "flow" ? colors.surface1 : withAlpha(COMPONENT_COLOR[page], 0.08), borderWidth: 1, borderColor: page === "flow" ? colors.border : withAlpha(COMPONENT_COLOR[page], 0.3) }}>
+        {page === "flow" ? <Icon name="Activity" size={22} color={colors.foreground} /> : <ComponentIcon component={page} size={30} />}
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 15, fontWeight: "700" }}>{title}</Text>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12, lineHeight: 17 }}>{about}</Text>
         </View>
-      ) : null}
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{about}</Text>
+      </View>
       {detail.isLoading ? <Loading /> : detail.error ? <Text style={{ color: colors.statusDanger, fontSize: 12 }}>{String(detail.error)}</Text> : !detail.data ? null : (
         <>
           {page === "brief" ? <BriefPage detail={detail.data} colors={colors} t={t} now={now} /> : null}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  addPost, boardText, claimPaths, confirmsBrief, createRun, finishMember, markCollected, memberOf, nextStep, normalizePath, pathsOverlap,
+  addPost, boardText, briefPosition, claimPaths, confirmsBrief, createRun, finishMember, markCollected, memberOf, nextStep, normalizePath, pathsOverlap,
   releaseClaims, roundComplete, runSummary, startBatch, startRound, upsertMember, conversationFrom, wakeMembers, boardPage, newRunId, timelineEnd, type Run,
 } from "../shared/collab";
 import { PLUGIN_MESSAGE_PREFIX } from "../shared/modes";
@@ -168,6 +168,27 @@ describe("intake confirmation", () => {
     expect(confirmsBrief(conversation, recordedAt, "“Looks good, go ahead!”")).toBe(true);
   });
 
+  it("checks by time once a daemon restart renumbered the timeline, and by position while the epoch holds", () => {
+    const pending = { seq: 114, epoch: "e1", at: "2026-11-16T12:38:28.467Z" };
+    // After the restart: new epoch, positions start from 1 again, but the timestamps stay.
+    const renumbered = [
+      { role: "user" as const, text: "确认，按这个简报开始吧。", seq: 19, at: "2026-11-16T12:38:13.548Z" },
+      { role: "assistant" as const, text: "简报已经记录，请再确认一次。", seq: 33, at: "2026-11-16T12:38:40.000Z" },
+      { role: "user" as const, text: "确认，就按这份简报和任务计划开始。", seq: 34, at: "2026-11-16T12:40:52.609Z" },
+    ];
+    expect(briefPosition(pending, "e2")).toEqual({ at: pending.at });
+    expect(confirmsBrief(renumbered, briefPosition(pending, "e2"), "确认，就按这份简报和任务计划开始。")).toBe(true);
+    // A confirmation sent before the brief was recorded still doesn't count.
+    expect(confirmsBrief(renumbered, briefPosition(pending, "e2"), "确认，按这个简报开始吧。")).toBe(false);
+    expect(briefPosition(pending, "e1")).toEqual({ seq: 114 });
+    expect(confirmsBrief(renumbered, briefPosition(pending, "e1"), "确认，就按这份简报和任务计划开始。")).toBe(false);
+  });
+
+  it("never takes a message the plugin sent for the user's confirmation, with the current or the old prefix", () => {
+    const sent = [...before, lead("Brief: ... Confirm?"), user("[ensemble] Looks good, go ahead"), user("[agent-team] Looks good, go ahead")];
+    expect(confirmsBrief(sent, recordedAt, "Looks good, go ahead")).toBe(false);
+  });
+
   it("rejects the request and anything else said before the brief, even right after the lead's greeting", () => {
     expect(confirmsBrief(conversation, recordedAt, "Build a login page and start the team")).toBe(false);
     expect(confirmsBrief(conversation, recordedAt, "Email + password, no OAuth")).toBe(false);
@@ -199,7 +220,7 @@ describe("intake confirmation", () => {
       null,
       { item: { type: "user_message", text: "go" }, seqStart: 7, seqEnd: 7, timestamp: T },
     ];
-    expect(conversationFrom(entries)).toEqual([{ role: "user", text: "hi", seq: 1 }, { role: "assistant", text: "hello", seq: 2 }, { role: "user", text: "go", seq: 7 }]);
+    expect(conversationFrom(entries)).toEqual([{ role: "user", text: "hi", seq: 1, at: T }, { role: "assistant", text: "hello", seq: 2, at: T }, { role: "user", text: "go", seq: 7, at: T }]);
     expect(timelineEnd(entries)).toBe(7);
     expect(timelineEnd([])).toBe(0);
   });

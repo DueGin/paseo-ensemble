@@ -1,7 +1,7 @@
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
-import { SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
+import { Icon, SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
@@ -12,6 +12,9 @@ import { PresetsSection, StartFromPresetDialog, usePresets } from "./Presets";
 import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
 
 export const SCREEN_ID = "team";
+
+/** A collaboration mode's color, the same as on the session dashboard. */
+const MODE_TONE = { auto: "#a78bfa", team: "#34d399", delegation: "#818cf8", none: "#9ca3af" } as const;
 
 /** Every project and its teams, refetched when the host's projects change. */
 function useProjectTeams() {
@@ -113,7 +116,20 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Text style={s.title}>{t("screen.title")}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 4 }}>
+        <View style={{ width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(theme.colors.accent, 0.16) }}>
+          <Icon name="Users" size={20} color={theme.colors.accent} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text style={[s.text, { fontSize: 20, fontWeight: "700" }]}>{t("screen.title")}</Text>
+          <Text style={s.muted}>{t("screen.subtitle")}</Text>
+        </View>
+        {projects.data ? (
+          <Text style={[s.muted, { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: theme.colors.surface1, borderWidth: 1, borderColor: theme.colors.border }]}>
+            {t("screen.stats", { projects: projects.data.length, teams: projects.data.reduce((sum, project) => sum + project.teams.length, 0), presets: presets.length })}
+          </Text>
+        ) : null}
+      </View>
       <PresetsSection s={s} colors={theme.colors} />
       <StartFromPresetDialog
         s={s}
@@ -161,24 +177,27 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
           {project.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
           {!project.teams.length ? <Text style={s.muted}>{t("screen.noTeams")}</Text> : null}
           {project.teams.map((team) => (
-            <View key={team.file} style={[s.card, { minWidth: 0, maxWidth: "100%", padding: 8, gap: 4, backgroundColor: theme.colors.surface2, borderLeftWidth: 3, borderLeftColor: team.workspaceId ? theme.colors.accent : theme.colors.statusWarning }]}>
-              <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-                <Text style={[s.text, { flex: 1, minWidth: 0, fontSize: 14, fontWeight: "700" }]}>{team.orchestratorWorkspace}</Text>
-                <Text style={s.muted}>{t("screen.roles", { count: team.roles })}{team.candidates ? ` · ${t("screen.candidates", { count: team.candidates })}` : ""} · {t(`mode.${team.mode}`)}</Text>
-              </View>
-              {team.goal ? <Text style={s.muted} numberOfLines={2}>{team.goal}</Text> : null}
-              {!team.workspaceId ? (
-                <View style={{ alignSelf: "flex-start", paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, borderWidth: 1, borderColor: theme.colors.statusWarning }}>
-                  <Text style={{ color: theme.colors.statusWarning, fontSize: 12, fontWeight: "600" }}>{t("screen.workspaceMissing")}</Text>
+            <View key={team.file} style={{ minWidth: 0, maxWidth: "100%", gap: 6, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1, borderLeftWidth: 3, borderLeftColor: team.workspaceId ? MODE_TONE[team.mode] : theme.colors.statusWarning }}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                <Icon name="Users" size={14} color={theme.colors.foregroundMuted} />
+                <Text numberOfLines={1} style={[s.text, { flexShrink: 1, minWidth: 0, fontSize: 14, fontWeight: "700" }]}>{team.orchestratorWorkspace}</Text>
+                <Text style={{ color: theme.colors.foreground, fontSize: 11, fontWeight: "600", paddingHorizontal: 7, paddingVertical: 1, borderRadius: 999, borderWidth: 1, borderColor: withAlpha(MODE_TONE[team.mode], 0.5), backgroundColor: withAlpha(MODE_TONE[team.mode], 0.14) }}>{t(`mode.${team.mode}`)}</Text>
+                {team.language ? <Text style={[s.muted, { fontSize: 11 }]}>{team.language === "zh" ? "中文" : "English"}</Text> : null}
+                <View style={{ flexDirection: "row", gap: 6, marginLeft: "auto" }}>
+                  {team.workspaceId ? (
+                    <Button s={s} label={t("screen.openTeam")} onPress={() => openTeamPanel?.(team.workspaceId!)} />
+                  ) : (
+                    <Button s={s} label={t("screen.reconnect")} disabled={reconnectBusy} onPress={() => { restored.reset(); setReconnecting(`${project.id}:${team.file}`); }} />
+                  )}
+                  <Button s={s} secondary label={t("screen.deleteTeam")} disabled={deleted.isPending} onPress={() => setConfirming(`${project.id}:${team.file}`)} />
                 </View>
-              ) : null}
-              <View style={s.row}>
-                {team.workspaceId ? (
-                  <Button s={s} secondary label={t("screen.openTeam")} onPress={() => openTeamPanel?.(team.workspaceId!)} />
-                ) : (
-                  <Button s={s} label={t("screen.reconnect")} disabled={reconnectBusy} onPress={() => { restored.reset(); setReconnecting(`${project.id}:${team.file}`); }} />
-                )}
-                <Button s={s} secondary label={t("screen.deleteTeam")} disabled={deleted.isPending} onPress={() => setConfirming(`${project.id}:${team.file}`)} />
+              </View>
+              {team.goal ? <Text style={[s.text, { fontSize: 12 }]} numberOfLines={2}>{team.goal}</Text> : null}
+              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+                <Text style={[s.muted, { fontSize: 11 }]}>{t("screen.lead")}</Text>
+                <Text style={{ color: theme.colors.foreground, fontSize: 11, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: theme.colors.surface2 }}>{team.orchestrator.provider}/{team.orchestrator.model}</Text>
+                <Text style={[s.muted, { fontSize: 11 }]}>· {t("screen.roles", { count: team.roles })}{team.candidates ? ` · ${t("screen.candidates", { count: team.candidates })}` : ""}</Text>
+                {!team.workspaceId ? <Text style={{ color: theme.colors.statusWarning, fontSize: 11, fontWeight: "600" }}>· {t("screen.workspaceMissing")}</Text> : null}
               </View>
               {!team.workspaceId && reconnecting === `${project.id}:${team.file}` ? (
                 <View style={[s.card, { width: "100%" }]}>

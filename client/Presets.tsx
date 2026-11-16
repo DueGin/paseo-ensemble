@@ -7,10 +7,11 @@ import { Modal } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { withAlpha } from "../shared/color";
 import { newCandidate } from "../shared/draft";
 import { languageFromLocale, type TeamMode } from "../shared/modes";
 import { namedCandidates, newPresetId, presetProblems, presetsSettings, presetToTeam, taskWorkspaceTitle, type Preset } from "../shared/presets";
-import { teamPresetStartRpc, type teamProjectsRpc } from "../shared/rpc";
+import { teamLegacyPresetsRpc, teamPresetStartRpc, type teamProjectsRpc } from "../shared/rpc";
 import { catalogFrom, validateTeam, type ProviderEntry, type ProviderInfo } from "../shared/validate";
 import { messages } from "./i18n";
 import { Button, CandidateEditor, LanguagePicker, ModelPicker, ModePicker, SelectHost, TeamModel, type Styles } from "./TeamPanel";
@@ -100,6 +101,9 @@ function PresetEditor({ s, colors, catalog, draft, onChange, onSave, onCancel, s
   );
 }
 
+/** A collaboration mode's color, as on the Agent teams screen and the session dashboard. */
+const PRESET_MODE_TONE = { auto: "#a78bfa", team: "#34d399", delegation: "#818cf8", none: "#9ca3af" } as const;
+
 /** The global preset library: list, create, edit, delete. */
 export function PresetsSection({ s, colors }: { s: Styles; colors: Colors }) {
   const { t, locale } = useTranslation(messages);
@@ -108,6 +112,8 @@ export function PresetsSection({ s, colors }: { s: Styles; colors: Colors }) {
   // The draft keeps the revision it was opened on, so a save never overwrites a newer change from another client.
   const [editing, setEditing] = useState<{ draft: Preset; revision: string; isNew: boolean } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const readLegacy = useRpc(teamLegacyPresetsRpc);
+  const legacy = useQuery({ queryKey: ["workspace-agents", "legacy-presets"], queryFn: () => readLegacy({}), staleTime: Infinity });
   if (settings.status === "loading") return <Text style={s.muted}>{t("loading")}</Text>;
   if (settings.status !== "ready") return <Text style={s.danger}>{t("presets.loadFailed", { error: settings.error })}</Text>;
   const presets = settings.values.presets;
@@ -129,13 +135,20 @@ export function PresetsSection({ s, colors }: { s: Styles; colors: Colors }) {
       {editing ? (
         <PresetEditor s={s} colors={colors} catalog={catalog} draft={editing.draft} onChange={(draft) => setEditing({ ...editing, draft })} onSave={() => void save()} onCancel={() => setEditing(null)} saving={settings.saving} error={settings.saveError} />
       ) : null}
+      {!presets.length && !editing && legacy.data?.presets.length ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 10, borderRadius: 8, borderWidth: 1, borderStyle: "dashed", borderColor: colors.accent }}>
+          <Text style={[s.text, { flex: 1, minWidth: 200, fontSize: 12 }]}>{t("presets.importLegacy", { count: legacy.data.presets.length })}</Text>
+          <Button s={s} label={t("presets.importButton")} disabled={settings.saving} onPress={() => void settings.save({ presets: legacy.data!.presets }, settings.revision)} />
+        </View>
+      ) : null}
       {!presets.length && !editing ? <Text style={s.muted}>{t("presets.none")}</Text> : null}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
         {presets.map((preset) => (
           <View key={preset.id} style={[s.card, { minWidth: 240, flexBasis: 300, flexGrow: 1, backgroundColor: colors.surface2, gap: 6 }]}>
             <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
               <Text style={[s.text, { flex: 1, minWidth: 0, fontWeight: "700", fontSize: 14 }]}>{preset.name}</Text>
-              <Text style={s.muted}>{t(`mode.${preset.mode}`)} · {(preset.language ?? languageFromLocale(locale)) === "zh" ? "中文" : "English"}</Text>
+              <Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "600", paddingHorizontal: 7, paddingVertical: 1, borderRadius: 999, borderWidth: 1, borderColor: withAlpha(PRESET_MODE_TONE[preset.mode], 0.5), backgroundColor: withAlpha(PRESET_MODE_TONE[preset.mode], 0.14) }}>{t(`mode.${preset.mode}`)}</Text>
+              <Text style={s.muted}>{(preset.language ?? languageFromLocale(locale)) === "zh" ? "中文" : "English"}</Text>
             </View>
             {preset.description ? <Text style={s.muted} numberOfLines={2}>{preset.description}</Text> : null}
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>

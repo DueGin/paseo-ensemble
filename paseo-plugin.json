@@ -1,6 +1,13 @@
 {
-  "id": "paseo-agent-team",
-  "name": "Paseo Agent Team",
+  "id": "paseo-ensemble",
+  "name": "Ensemble",
+  "description": "Agent teams for Paseo: a lead and members on their own providers and models, in team (shared board) or delegation mode, with a live data-flow dashboard",
+  "translations": {
+    "zh-CN": {
+      "name": "Ensemble 智能体团队",
+      "description": "Paseo 里的智能体团队：协调器和成员各用自己的 provider 与模型，按团队（共享黑板）或委派模式协作，实时展示数据流"
+    }
+  },
   "media": [],
   "requirements": {
     "paseo": ">=0.15.0"

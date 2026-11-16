@@ -121,7 +121,7 @@ describe("startFromPreset", () => {
     expect(result.ok).toBe(true);
     const parsed = parseTeam(readFileSync(join(root, TEAMS_DIR, "main.json"), "utf8"));
     expect(parsed.ok && parsed.team.mode).toBe("delegation");
-    expect(createdAgents[0]!.options.prompt).toMatch(/^\[agent-team\] Read \.agents\/teams\/main\.json/);
+    expect(createdAgents[0]!.options.prompt).toMatch(/^\[ensemble\] Read \.agents\/teams\/main\.json/);
   });
 
   it("refuses a workspace that already runs a team, an unknown preset, and a host without Paseo tools", async () => {

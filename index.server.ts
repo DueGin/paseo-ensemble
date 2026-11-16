@@ -1,8 +1,9 @@
 import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { contributeCollaboration, sessionDetail, sessionInfo, setSessionMode } from "./server/collab";
+import { legacyPresets } from "./server/legacy";
 import { presetsSettings } from "./shared/presets";
 import { applyTeam, startFromPreset, cancelProposal, deleteTeam, improveInstructions, instructionsProposal, pendingProposal, projectTeamsList, proposeTeamEdit, proposeTeam, readTeam, reconnectTeam, restartOrchestrator, restoreTeam, teamEditProposal, teamProposal, teamRoster } from "./server/team";
-import { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc, teamSessionModeRpc, teamSessionRpc, teamSessionDetailRpc, teamPresetStartRpc } from "./shared/rpc";
+import { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc, teamSessionModeRpc, teamSessionRpc, teamSessionDetailRpc, teamPresetStartRpc, teamLegacyPresetsRpc } from "./shared/rpc";
 
 export default function contribute(server: PluginServerContext) {
   // Global team presets live in host settings, shared by every client and project of the host.
@@ -12,6 +13,7 @@ export default function contribute(server: PluginServerContext) {
     if (current.status !== "ready") return { ok: false as const, errors: [`The team presets can't be read: ${current.error}`] };
     return startFromPreset(input, ctx, current.values.presets);
   });
+  server.handle(teamLegacyPresetsRpc, () => legacyPresets());
   server.handle(teamProjectsRpc, projectTeamsList);
   server.handle(teamDeleteRpc, deleteTeam);
   server.handle(teamReconnectRpc, reconnectTeam);

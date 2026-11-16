@@ -49,6 +49,8 @@ export async function projectTeamsList(_input: RpcInput<typeof teamProjectsRpc>,
         roles: team.roles.length,
         candidates: team.candidates.length,
         mode: team.mode,
+        orchestrator: { provider: team.orchestrator.provider, model: team.orchestrator.model },
+        language: team.language ?? null,
       })),
       errors,
     };

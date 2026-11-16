@@ -187,7 +187,7 @@ export function contributeSessionAccess(client: PluginClientContext): () => void
       return undefined;
     })
     .catch((error: unknown) => {
-      if (!lifetime.signal.aborted) console.error("[agent-team] watching agents for composer pills failed", error);
+      if (!lifetime.signal.aborted) console.error("[ensemble] watching agents for composer pills failed", error);
     });
 
   return () => {

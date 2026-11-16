@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { withFreeWorkspaces } from "../shared/apply-plan";
+import { withAlpha } from "../shared/color";
 import { foldersText, newCandidate, newRole, parseFolders } from "../shared/draft";
 import { EMPTY_HISTORY, record, undo, redo, type DraftHistory } from "../shared/draft-history";
 import { messages } from "./i18n";
@@ -821,8 +822,16 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied }: Pic
 
   return (
     <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <Text style={s.title}>{t("title", { project: data.project.name })}</Text>
-      <Text style={s.muted}>{data.project.root}/{data.file ?? `${TEAMS_DIR}/`}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, maxWidth: 960 }}>
+        <View style={{ width: 38, height: 38, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(theme.colors.accent, 0.16) }}>
+          <Icon name="Users" size={19} color={theme.colors.accent} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <Text style={[s.text, { fontSize: 18, fontWeight: "700" }]}>{t("title", { project: data.project.name })}</Text>
+          {data.team?.goal ? <Text style={[s.text, { fontSize: 12 }]} numberOfLines={2}>{data.team.goal}</Text> : null}
+          <Text style={[s.muted, { fontSize: 11 }]} numberOfLines={1}>{data.file ?? `${TEAMS_DIR}/`}</Text>
+        </View>
+      </View>
 
       {data.toolsEnabled === false ? <Text style={s.danger}>{t("toolsOff")}</Text> : null}
       {data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}

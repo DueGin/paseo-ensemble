@@ -18,6 +18,9 @@ import type { TeamMode } from "../shared/modes";
 import type { teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
 import { TeamSchema, type Team } from "../shared/team";
 
+/** The installed plugin to call, from this checkout's manifest. */
+const PLUGIN_ID = (JSON.parse(readFileSync(join(__dirname, "..", "paseo-plugin.json"), "utf8")) as { id: string }).id;
+
 const [provider, model] = (process.env.PASEO_E2E_MODEL ?? "claude/claude-haiku-5-5").split("/") as [string, string];
 
 describe.skipIf(!process.env.PASEO_E2E)("collaboration modes against the local daemon", () => {
@@ -40,8 +43,8 @@ describe.skipIf(!process.env.PASEO_E2E)("collaboration modes against the local d
   });
 
   // The plugin's own RPCs, served by the installed plugin's process, so the test sees what the app sees.
-  const sessionInfo = (agentId: string) => daemon.invokePluginRpc("paseo-agent-team", "team.session", { agentId }) as Promise<RpcOutput<typeof teamSessionRpc>>;
-  const setSessionMode = (agentId: string, mode: TeamMode | null) => daemon.invokePluginRpc("paseo-agent-team", "team.session.mode", { agentId, mode }) as Promise<RpcOutput<typeof teamSessionModeRpc>>;
+  const sessionInfo = (agentId: string) => daemon.invokePluginRpc(PLUGIN_ID, "team.session", { agentId }) as Promise<RpcOutput<typeof teamSessionRpc>>;
+  const setSessionMode = (agentId: string, mode: TeamMode | null) => daemon.invokePluginRpc(PLUGIN_ID, "team.session.mode", { agentId, mode }) as Promise<RpcOutput<typeof teamSessionModeRpc>>;
 
   const runs = (): Run[] => (existsSync(join(root, RUNS_DIR)) ? readdirSync(join(root, RUNS_DIR)).filter((name) => /^R.*\.json$/.test(name)).map((name) => JSON.parse(readFileSync(join(root, RUNS_DIR, name), "utf8")) as Run) : []);
 
@@ -70,7 +73,7 @@ describe.skipIf(!process.env.PASEO_E2E)("collaboration modes against the local d
   beforeAll(async () => {
     paseo = createPaseoClient({ url: process.env.PASEO_URL ?? "ws://127.0.0.1:6767/ws", reconnect: { enabled: false } });
     await paseo.connect();
-    daemon = new DaemonClient({ url: process.env.PASEO_URL ?? "ws://127.0.0.1:6767/ws", clientId: "agent-team-collab-e2e", clientType: "cli" });
+    daemon = new DaemonClient({ url: process.env.PASEO_URL ?? "ws://127.0.0.1:6767/ws", clientId: "ensemble-collab-e2e", clientType: "cli" });
     await daemon.connect();
     root = mkdtempSync(join(tmpdir(), "agent-team-collab-"));
     execFileSync("git", ["init", "-q", root]);
@@ -315,7 +318,8 @@ describe.skipIf(!process.env.PASEO_E2E)("collaboration modes against the local d
     const checksTask = run.tasks.find((task) => /checks\/desc\.check/.test(task.detail));
     expect(notesTask?.role).toBe(notesOwner);
     expect(checksTask?.role).toBe(checksOwner);
-    expect(run.tasks.every((task) => !(task.role === notesOwner && /checks\//.test(task.detail)) && !(task.role === checksOwner && /notes\//.test(task.detail)))).toBe(true);
+    // A packet may say "do not touch checks/", but never gives the notes candidate the checks file, or the other way round.
+    expect(run.tasks.every((task) => !(task.role === notesOwner && /checks\/desc\.check/.test(task.detail)) && !(task.role === checksOwner && /notes\/desc\.txt/.test(task.detail)))).toBe(true);
     expect(existsSync(join(root, "notes/desc.txt")) && existsSync(join(root, "checks/desc.check"))).toBe(true);
   }, 1_500_000);
 });

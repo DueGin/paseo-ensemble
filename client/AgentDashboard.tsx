@@ -32,7 +32,7 @@ import {
   type ProviderSubagent,
 } from "../shared/subagents";
 import { messages } from "./i18n";
-import { COMPONENT_PAGES, ComponentDetail, RunOverview, type ComponentPage } from "./RunComponents";
+import { COMPONENT_PAGES, ComponentDetail, RunOverview, SessionTabs, type ComponentPage, type SessionTab } from "./RunComponents";
 
 const RED = "#ff5a5f";
 const GLOW = "#ff9a9d";
@@ -1454,8 +1454,11 @@ function Dashboard(props: DashboardProps) {
     [roster.data],
   );
   const closedIds = dismissibleIds(forest);
-  const page = sessionRoot && state.page && (COMPONENT_PAGES as readonly string[]).includes(state.page) ? (state.page as ComponentPage) : null;
-  const openPage = (next: ComponentPage | null) => setState({ ...state, page: next });
+  // A team lead's session gets tabs: its overview, its agents, and a page per component of the mode.
+  const teamSession = sessionRoot !== null && !!session.data?.leadAgentId;
+  const tabMode = session.data?.run?.mode ?? (session.data?.effective === "delegation" || session.data?.locked === "delegation" ? "delegation" : "team");
+  const tab: SessionTab = !teamSession ? "agents" : state.page === "agents" ? "agents" : state.page && (COMPONENT_PAGES as readonly string[]).includes(state.page) ? (state.page as ComponentPage) : "overview";
+  const openPage = (next: SessionTab | null) => setState({ ...state, page: next === "overview" ? null : next });
   const icons = useMemo(
     () =>
       new Map(
@@ -1530,41 +1533,36 @@ function Dashboard(props: DashboardProps) {
     expandedSubagents,
     toggleSubagents,
   };
+  const leadNode = teamSession ? allAgents.find((agent) => agent.id === session.data?.leadAgentId) : undefined;
+  const leadStatus = leadNode?.status;
+  const statusColor = leadStatus === "running" ? AMBER : leadStatus === "error" ? RED : leadStatus === "idle" ? colors.statusSuccess : colors.foregroundMuted;
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
       <AnimationAnchor value={flow} />
       <AnimationAnchor value={glow} />
       <AnimationAnchor value={packet} />
-      <View
-        style={{
-          paddingHorizontal: props.layout.compact ? 16 : 24,
-          paddingVertical: 16,
-          borderBottomWidth: 1,
-          borderColor: colors.border,
-          flexDirection: "row",
-          flexWrap: "wrap",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-        }}
-      >
-        <Text
-          style={{ color: colors.foreground, fontSize: 18, fontWeight: "700" }}
-        >
-          {props.sessionAgentId ? t("session.title") : t("dashboardTitle")}
-        </Text>
-        <View
-          style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
-            alignItems: "center",
-            justifyContent: "flex-end",
-            flexShrink: 1,
-            marginLeft: "auto",
-            maxWidth: "100%",
-            gap: 12,
-          }}
-        >
+      <View style={{ paddingHorizontal: pad, paddingTop: 14, paddingBottom: teamSession ? 0 : 12, gap: 10, borderBottomWidth: teamSession ? 0 : 1, borderColor: colors.border }}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexShrink: 1, minWidth: 0 }}>
+            <View style={{ width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(colors.accent, 0.16) }}>
+              <Icon name={teamSession ? "Users" : "Network"} size={16} color={colors.accent} />
+            </View>
+            <View style={{ flexShrink: 1, minWidth: 0 }}>
+              <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "700" }}>
+                {props.sessionAgentId ? t("session.title") : t("dashboardTitle")}
+              </Text>
+              {teamSession ? (
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusColor }} />
+                  <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
+                    {t("orchestrator")}{leadNode?.model ? ` · ${shortModel(leadNode.model)}` : ""}{session.data?.effective ? ` · ${t(`mode.${session.data.effective}`)}` : ""}{session.data?.locked ? " 🔒" : ""}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
+          </View>
+          {tab === "agents" ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", flexShrink: 1, marginLeft: "auto", maxWidth: "100%", gap: 12 }}>
           <View
             accessibilityLabel={t("density.label")}
             style={{
@@ -1610,19 +1608,22 @@ function Dashboard(props: DashboardProps) {
               );
             })}
           </View>
+            </View>
+          ) : null}
         </View>
+      {!props.sessionAgentId && (state.session !== null || [...workspaceSessions.trees, ...workspaceSessions.solo].length > 1) ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingTop: 0 }}>
+          <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginRight: 2 }}>{t("session.scopeLabel")}</Text>
+          <Chip label={t("session.allSessions")} selected={state.session === null} colors={colors} onPress={() => setState({ ...state, session: null, page: null })} />
+          {[...workspaceSessions.trees, ...workspaceSessions.solo].map((node) => (
+            <Chip key={node.agent.id} label={node.role || node.title} selected={state.session === node.agent.id} colors={colors} onPress={() => setState({ ...state, session: node.agent.id, page: null })} />
+          ))}
+        </View>
+      ) : null}
+        {teamSession ? <SessionTabs mode={tabMode} tab={tab} run={session.data?.run ?? null} pending={!!session.data?.pendingBrief} colors={colors} t={t} onOpen={openPage} /> : null}
       </View>
-      <View
-        style={{
-          flexDirection: "row",
-          flexWrap: "wrap",
-          justifyContent: "flex-end",
-          alignItems: "center",
-          paddingHorizontal: pad,
-          paddingTop: 12,
-          gap: 12,
-        }}
-      >
+      {tab === "agents" ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", paddingHorizontal: pad, paddingTop: 12, gap: 12 }}>
           <Pressable
             accessibilityRole="switch"
             accessibilityState={{ checked: state.showClosed }}
@@ -1671,18 +1672,12 @@ function Dashboard(props: DashboardProps) {
               <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("hideAllClosed", { count: closedIds.length })}</Text>
             </Pressable>
           ) : null}
-      </View>
-      {!props.sessionAgentId && (state.session !== null || [...workspaceSessions.trees, ...workspaceSessions.solo].length > 1) ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingHorizontal: pad, paddingTop: 10 }}>
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginRight: 2 }}>{t("session.scopeLabel")}</Text>
-          <Chip label={t("session.allSessions")} selected={state.session === null} colors={colors} onPress={() => setState({ ...state, session: null, page: null })} />
-          {[...workspaceSessions.trees, ...workspaceSessions.solo].map((node) => (
-            <Chip key={node.agent.id} label={node.role || node.title} selected={state.session === node.agent.id} colors={colors} onPress={() => setState({ ...state, session: node.agent.id, page: null })} />
-          ))}
         </View>
       ) : null}
+      {tab === "overview" ? (
+        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad, gap: 14 }}>
       {session.data?.leadAgentId && session.data.configured && session.data.effective ? (
-        <View style={{ gap: 4, paddingHorizontal: pad, paddingTop: 10 }}>
+        <View style={{ gap: 4 }}>
           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
             <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginRight: 2 }}>{t("mode.label")}</Text>
             {TEAM_MODES.map((mode) => (
@@ -1696,9 +1691,28 @@ function Dashboard(props: DashboardProps) {
           ) : null}
         </View>
       ) : null}
-      {page && sessionRoot ? (
+          {session.data?.run || session.data?.pendingBrief ? (
+            <RunOverview
+              run={session.data.run}
+              roles={session.data.roles}
+              pending={session.data.pendingBrief}
+              leadAgentId={session.data.leadAgentId}
+              colors={colors}
+              t={t}
+              openAgent={treeProps.open}
+              onOpen={openPage}
+              width={undefined}
+            />
+          ) : (
+            <View style={{ alignItems: "center", gap: 8, paddingVertical: 32 }}>
+              <Icon name="Users" size={28} color={colors.foregroundMuted} />
+              <Text style={{ color: colors.foregroundMuted, fontSize: 12, textAlign: "center" }}>{t("session.noRun")}</Text>
+            </View>
+          )}
+        </ScrollView>
+      ) : tab !== "agents" && sessionRoot ? (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
-          <ComponentDetail page={page} sessionAgentId={sessionRoot} colors={colors} t={t} onBack={() => openPage(null)} onOpen={openPage} />
+          <ComponentDetail page={tab} sessionAgentId={sessionRoot} colors={colors} t={t} />
         </ScrollView>
       ) : (
       <ScrollView
@@ -1776,21 +1790,6 @@ function Dashboard(props: DashboardProps) {
               )}
             </>
           )}
-          {session.data?.run || session.data?.pendingBrief ? (
-            <RunOverview
-              run={session.data.run}
-              roles={session.data.roles}
-              pending={session.data.pendingBrief}
-              leadAgentId={session.data.leadAgentId}
-              colors={colors}
-              t={t}
-              openAgent={treeProps.open}
-              onOpen={openPage}
-              width={panelWidth > 0 ? Math.max(0, panelWidth - pad * 2) : undefined}
-            />
-          ) : session.data?.leadAgentId ? (
-            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("session.noRun")}</Text>
-          ) : null}
         </ScrollView>
       </ScrollView>
       )}

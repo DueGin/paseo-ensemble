@@ -1,7 +1,7 @@
 // The state of one collaboration run: the request the lead hands to members, the members working on it and, in team
 // mode, the shared board. Pure functions only, so the daemon handlers and the tests share them.
 import type { RunEvent } from "./flow";
-import { MODE_SPECS, PLUGIN_MESSAGE_PREFIX, type CollabMode, type PromptLanguage } from "./modes";
+import { LEGACY_MESSAGE_PREFIX, MODE_SPECS, PLUGIN_MESSAGE_PREFIX, type CollabMode, type PromptLanguage } from "./modes";
 
 export const POST_KINDS = ["brief", "update", "finding", "question", "answer", "done", "note"] as const;
 export type PostKind = (typeof POST_KINDS)[number];
@@ -930,6 +930,8 @@ export interface ChatMessage {
   text: string;
   /** The timeline position; later messages have larger ones. */
   seq: number;
+  /** When it was sent, from the timeline entry. */
+  at?: string;
 }
 
 /** A brief the lead showed the user, waiting for their confirmation; `seq` is the end of the lead's chat when it was recorded. */
@@ -941,20 +943,33 @@ export interface PendingBrief {
   /** The task breakdown shown with the brief; `after` holds 1-based positions in this list. */
   tasks: NewTask[];
   planApproval: boolean;
+  /** The end of the lead's timeline when the brief was recorded. */
   seq: number;
+  /** The timeline's epoch at that point: positions are only comparable within one epoch (a daemon restart renumbers). */
+  epoch?: string;
   at: string;
 }
 
+/** Where a brief was recorded: a timeline position, or a time when the timeline was renumbered since. */
+export type BriefPosition = number | { seq: number } | { at: string };
+
+/** The position to check a confirmation against: the recorded one while the timeline keeps its epoch, the time otherwise. */
+export function briefPosition(pending: Pick<PendingBrief, "seq" | "epoch" | "at">, epoch: string | undefined): BriefPosition {
+  return pending.epoch !== undefined && pending.epoch === epoch ? { seq: pending.seq } : { at: pending.at };
+}
+
 /**
- * Whether `quote` is the user's confirmation of a brief recorded at `afterSeq`: a fair part of a message the user sent
+ * Whether `quote` is the user's confirmation of a brief recorded at `after`: a fair part of a message the user sent
  * after the brief was shown, not a message the plugin sent. The request, or anything said before the brief, can't count,
  * so intake always takes a turn in which the lead shows the brief and the user agrees to it.
  */
-export function confirmsBrief(conversation: readonly ChatMessage[], afterSeq: number, quote: string): boolean {
+export function confirmsBrief(conversation: readonly ChatMessage[], after: BriefPosition, quote: string): boolean {
   const needle = squash(quote);
   if (!needle) return false;
+  const position = typeof after === "number" ? { seq: after } : after;
+  const later = (message: ChatMessage) => ("at" in position ? message.at !== undefined && Date.parse(message.at) > Date.parse(position.at) : message.seq > position.seq);
   return conversation.some((message) => {
-    if (message.role !== "user" || message.seq <= afterSeq || message.text.trimStart().startsWith(PLUGIN_MESSAGE_PREFIX)) return false;
+    if (message.role !== "user" || !later(message) || [PLUGIN_MESSAGE_PREFIX, LEGACY_MESSAGE_PREFIX].some((prefix) => message.text.trimStart().startsWith(prefix))) return false;
     const text = squash(message.text);
     // A word picked out of a long correction isn't a confirmation.
     return text.includes(needle) && needle.length >= Math.min(text.length, Math.ceil(text.length * 0.4));
@@ -966,11 +981,11 @@ export function conversationFrom(entries: readonly unknown[]): ChatMessage[] {
   return entries
     .flatMap((entry) => {
       if (!entry || typeof entry !== "object") return [];
-      const { item, seqStart } = entry as { item?: unknown; seqStart?: unknown };
+      const { item, seqStart, timestamp } = entry as { item?: unknown; seqStart?: unknown; timestamp?: unknown };
       if (!item || typeof item !== "object" || typeof seqStart !== "number") return [];
       const { type, text } = item as { type?: unknown; text?: unknown };
       if (typeof text !== "string" || (type !== "user_message" && type !== "assistant_message")) return [];
-      return [{ role: type === "user_message" ? "user" : "assistant", text, seq: seqStart } as ChatMessage];
+      return [{ role: type === "user_message" ? "user" : "assistant", text, seq: seqStart, ...(typeof timestamp === "string" ? { at: timestamp } : {}) } as ChatMessage];
     })
     .sort((a, b) => a.seq - b.seq);
 }

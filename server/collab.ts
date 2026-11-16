@@ -9,7 +9,7 @@ import { z } from "zod";
 import { workspaceLabel } from "../shared/apply-plan";
 import { LABEL } from "../shared/cleanup";
 import {
-  addBatch, addPost, addTasks, assignTasks, attachPacket, batchToSummarize, summarizeBatch, boardPage, briefText, claimPaths, claimTask, completeTask, confirmsBrief, conversationFrom, createRun, DEFAULT_TEAM_ROUNDS,
+  addBatch, addPost, addTasks, assignTasks, attachPacket, batchToSummarize, summarizeBatch, boardPage, briefPosition, briefText, claimPaths, claimTask, completeTask, confirmsBrief, conversationFrom, createRun, DEFAULT_TEAM_ROUNDS,
   excerpt, finishMember, inboxOf, inboxText, leadInbox, markCollected, markInbox, markPlansNotified, MAX_NUDGES, MAX_ROUNDS, MAX_TEAM_SIZE,
   MEMBER_POST_KINDS, memberOf, memberTitle, newRunId, nextStep, normalizeRun, pathsOverlap, pendingPlans, postLine, rejectTask, releaseClaims, releaseTask,
   retireMember, retireRole, reviewPlan, roundComplete, runFinished, runSummary, startBatch, startRound, submitPlan, taskBoardText, taskOf, taskReady, timelineEnd, TO_ALL,
@@ -97,7 +97,7 @@ class RunStore {
   loadAll(paseo: PaseoApi): Promise<void> {
     if (!this.everything) {
       this.everything = allProjects(paseo)
-        .then(async (projects) => { await Promise.all(projects.map((project) => this.load(project.root).catch((error) => console.error(`[agent-team] reading runs of ${project.root} failed`, error)))); })
+        .then(async (projects) => { await Promise.all(projects.map((project) => this.load(project.root).catch((error) => console.error(`[ensemble] reading runs of ${project.root} failed`, error)))); })
         .catch((error) => {
           this.everything = null;
           throw error;
@@ -119,7 +119,7 @@ class RunStore {
         const run = JSON.parse(await readFile(join(dir, name), "utf8")) as Run;
         if (run?.version === 1 && typeof run.id === "string") loaded.push(normalizeRun(run));
       } catch (error) {
-        console.error(`[agent-team] skipping unreadable run ${name}`, error);
+        console.error(`[ensemble] skipping unreadable run ${name}`, error);
       }
     }
     const closed = loaded.filter((run) => run.status === "closed").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
@@ -221,7 +221,7 @@ class RunStore {
   private async ensureIgnored(root: string): Promise<void> {
     const file = join(root, RUNS_DIR, ".gitignore");
     const exists = await readFile(file, "utf8").then(() => true, () => false);
-    if (!exists) await writeFileAtomic(file, "# Collaboration runs of the Paseo agent-team plugin; local state, not shared.\n*\n");
+    if (!exists) await writeFileAtomic(file, "# Collaboration runs of the Ensemble plugin for Paseo; local state, not shared.\n*\n");
   }
 
   /** Records events no state change shows, such as a refused file claim. */
@@ -504,7 +504,7 @@ async function staff(paseo: PaseoApi, runId: string): Promise<void> {
         return addPost(upsertMember(reopened, { role: spec.name, agentId: started.agentId, title: started.title, task: "" }, now()), { author: "lead", agentId: run.leadAgentId, kind: "note", text: latest.language === "zh" ? `${started.title}（${spec.name}）为它的待办任务加入了运行。` : `${started.title} (${spec.name}) joined the run for its open tasks.`, to: [], files: [] }, now()).run;
       });
     } catch (error) {
-      console.error(`[agent-team] run ${runId}: could not staff ${role}`, error);
+      console.error(`[ensemble] run ${runId}: could not staff ${role}`, error);
     } finally {
       staffing.delete(lock);
     }
@@ -529,7 +529,7 @@ function advance(paseo: PaseoApi, runId: string, depth = 0): Promise<void> {
 
 async function moveAlong(paseo: PaseoApi, runId: string, depth: number): Promise<void> {
   if (depth > 6) return;
-  await staff(paseo, runId).catch((error) => console.error(`[agent-team] staffing ${runId} failed`, error));
+  await staff(paseo, runId).catch((error) => console.error(`[ensemble] staffing ${runId} failed`, error));
   let action: Action | null = null;
   await store.mutate(runId, (current) => {
     const step = nextStep(current);
@@ -622,7 +622,7 @@ async function moveAlong(paseo: PaseoApi, runId: string, depth: number): Promise
     for (const member of taken.run.members.filter((entry) => entry.state === "working")) {
       const sent = await sendWhenIdle(paseo, member.agentId, promptsFor(taken.run.language).teamRoundPrompt(taken.run, member.readSeq)).catch(() => false);
       if (sent) continue;
-      console.error(`[agent-team] run ${runId}: could not start round ${taken.run.round} for ${member.title}`);
+      console.error(`[ensemble] run ${runId}: could not start round ${taken.run.round} for ${member.title}`);
       await store.mutate(runId, (current) => finishMember(current, member.agentId, "failed", `(could not start round ${current.round}: the agent was not idle or is gone)`, now()));
     }
     await advance(paseo, runId, depth + 1);
@@ -696,7 +696,7 @@ let sweeping: ReturnType<typeof setInterval> | null = null;
 function startSweep(paseo: PaseoApi): void {
   if (sweeping) return;
   sweeping = setInterval(() => {
-    for (const run of store.activeRuns()) void reconcile(paseo, run.id).catch((error) => console.error(`[agent-team] sweep of ${run.id} failed`, error));
+    for (const run of store.activeRuns()) void reconcile(paseo, run.id).catch((error) => console.error(`[ensemble] sweep of ${run.id} failed`, error));
   }, 60_000);
   sweeping.unref?.();
 }
@@ -1108,7 +1108,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       // Only what the user says after this point can confirm the brief.
       const page = await paseo.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: 20 });
       const recorded = { title: brief.title.trim(), goal: brief.goal.trim(), requirements: brief.requirements, acceptance: brief.acceptance, constraints: brief.constraints, outOfScope: brief.outOfScope };
-      const pending: PendingBrief = { brief: recorded, roles: specs.map((spec) => spec.name), rounds: rounds ?? DEFAULT_TEAM_ROUNDS, reason: reason?.trim() ?? "", tasks: plan, planApproval: planApproval === true, seq: timelineEnd(page.entries), at: now() };
+      const pending: PendingBrief = { brief: recorded, roles: specs.map((spec) => spec.name), rounds: rounds ?? DEFAULT_TEAM_ROUNDS, reason: reason?.trim() ?? "", tasks: plan, planApproval: planApproval === true, seq: timelineEnd(page.entries), ...(typeof page.epoch === "string" ? { epoch: page.epoch } : {}), at: now() };
       await store.setPendingBrief(ctx.project.root, agent.id, pending);
       return ok([
         tr("Brief recorded. Show it to the user as below, with the task plan and the roles taking part, ask them to confirm or correct it, and end your turn. Don't start members yet.", "需求简报已记录。请把下面的简报、任务计划和参与角色展示给用户，请对方确认或修改，然后结束本轮。先不要启动成员。"),
@@ -1141,7 +1141,8 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       const pending = await store.pendingBrief(ctx.project.root, agent.id);
       if (!pending) return fail(tr(`No brief is recorded. Finish intake: call ${L.brief} with the brief and task plan, show them to the user and end your turn; start the team after they confirm.`, `还没有记录需求简报。请先完成需求对接：用 ${L.brief} 记录简报和任务计划，展示给用户并结束本轮；用户确认后再启动团队。`));
       const page = await paseo.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: 120 });
-      if (!confirmsBrief(conversationFrom(page.entries), pending.seq, userConfirmation)) {
+      // A daemon restart renumbers the timeline; then the confirmation is checked by time instead of position.
+      if (!confirmsBrief(conversationFrom(page.entries), briefPosition(pending, typeof page.epoch === "string" ? page.epoch : undefined), userConfirmation)) {
         return fail(tr(
           `userConfirmation must quote the user's reply to the brief recorded with ${L.brief}: a message they sent after you showed it. It does not match one. Show the user the brief, end your turn, and call this tool once they confirm. A request, or anything said before the brief, cannot confirm it.`,
           `userConfirmation 必须引用用户对 ${L.brief} 所记录简报的回复，也就是你展示简报之后用户发的消息，现在对不上。请把简报展示给用户并结束本轮，等用户确认后再调用。需求本身或简报之前说的话都不能算确认。`,
@@ -1400,7 +1401,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
         if (final || attention || plans || mail || stalled || Date.now() >= deadline || signal.aborted) break;
         if (Date.now() - lastCheck > 10_000) {
           lastCheck = Date.now();
-          await reconcile(paseo, run.id).catch((error) => console.error(`[agent-team] reconcile ${run.id} failed`, error));
+          await reconcile(paseo, run.id).catch((error) => console.error(`[ensemble] reconcile ${run.id} failed`, error));
           continue;
         }
         await sleep(2000, signal);
@@ -1723,13 +1724,13 @@ export function contributeCollaboration(server: PluginServerContext): () => void
   });
   server.addHook("agent.turn.after", async ({ agent, outcome }, { paseo }) => {
     startSweep(paseo);
-    await onTurnEnded(paseo, agent.id, outcome.kind).catch((error) => console.error(`[agent-team] after turn of ${agent.id}`, error));
+    await onTurnEnded(paseo, agent.id, outcome.kind).catch((error) => console.error(`[ensemble] after turn of ${agent.id}`, error));
   });
   server.addHook("agent.permission.before", async ({ agent }, { paseo }) => {
-    await onAttention(paseo, agent.id, "attention").catch((error) => console.error(`[agent-team] permission of ${agent.id}`, error));
+    await onAttention(paseo, agent.id, "attention").catch((error) => console.error(`[ensemble] permission of ${agent.id}`, error));
   });
   server.addHook("agent.permission.after", async ({ agent }, { paseo }) => {
-    await onAttention(paseo, agent.id, "working").catch((error) => console.error(`[agent-team] permission of ${agent.id}`, error));
+    await onAttention(paseo, agent.id, "working").catch((error) => console.error(`[ensemble] permission of ${agent.id}`, error));
   });
   server.addHook("agent.archive.after", async ({ agent }, { paseo }) => {
     await store.loadAll(paseo).catch(() => undefined);
@@ -1772,6 +1773,8 @@ function runView(run: Run): NonNullable<RpcOutput<typeof teamSessionRpc>["run"]>
     round: run.round,
     rounds: run.rounds,
     planApproval: run.planApproval,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
     brief: run.brief ? { title: run.brief.title, goal: run.brief.goal, acceptance: run.brief.acceptance } : null,
     members: run.members.map((member) => ({ role: member.role, agentId: member.agentId, title: member.title, state: member.state, task: excerpt(member.task, 280), retired: member.retired })),
     tasks: run.tasks.map((task) => ({ id: task.id, title: excerpt(task.title, 160), role: task.role, state: task.state, ownerTitle: task.ownerTitle, waitingOn: task.state === "todo" ? task.deps.filter((dep) => taskOf(run, dep)?.state !== "done") : [], plan: task.plan?.status ?? null, sentBack: task.feedback !== "" && task.state !== "done" })),

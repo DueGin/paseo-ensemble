@@ -1,8 +1,8 @@
 {
-  "name": "paseo-agent-team",
+  "name": "paseo-ensemble",
   "private": true,
-  "version": "0.3.0",
-  "description": "Project-scoped agent teams for Paseo: roles on their own providers and models, led by an orchestrator in team (intake + shared board) or delegation mode, with a per-session dashboard.",
+  "version": "0.4.0",
+  "description": "Ensemble: agent teams for Paseo. A lead and members on their own providers and models, in team (intake + shared board) or delegation mode, with a live data-flow dashboard.",
   "files": [
     "paseo-plugin.json",
     "OVERVIEW.md",
@@ -27,5 +27,10 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.11",
     "zod": "^4.4.3"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DueGin/paseo-ensemble.git"
   }
 }

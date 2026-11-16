@@ -177,6 +177,8 @@ describe("delegation (MA-04): split → isolated sub-agents → reports → summ
     run = step(run, (current) => summarizeBatch(current, "second", T0), "lead");
     expect(run.batches.map((batch) => batch.summary)).toEqual(["first", "second"]);
     expect(pick(run).filter((line) => line.startsWith("split:followup") || line.startsWith("summary:summarize"))).toEqual(["summary:summarize:in:lead>:1", "split:followup:in:lead>:2", "summary:summarize:in:lead>:2"]);
+    // A delegation run's next batch is shown as its split, never as a team board round.
+    expect(pick(run).some((line) => line.startsWith("board:round"))).toBe(false);
   });
 });
 

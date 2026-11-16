@@ -2,6 +2,7 @@ import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { FLOW_ACTIONS, RUN_COMPONENTS } from "./flow";
 import { COLLAB_MODES, PROMPT_LANGUAGES, TEAM_MODES } from "./modes";
+import { PresetSchema } from "./presets";
 import { TeamSchema } from "./team";
 
 const ProviderInfoSchema = z.object({
@@ -32,6 +33,9 @@ export const teamProjectsRpc = defineRpc({
       roles: z.number(),
       candidates: z.number(),
       mode: z.enum(TEAM_MODES),
+      /** The orchestrator's provider and model. */
+      orchestrator: z.object({ provider: z.string(), model: z.string() }),
+      language: z.enum(["zh", "en"]).nullable(),
     })),
     errors: z.array(z.string()),
   })),
@@ -270,6 +274,8 @@ const RunViewSchema = z.object({
   round: z.number(),
   rounds: z.number(),
   planApproval: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
   brief: z.object({ title: z.string(), goal: z.string(), acceptance: z.array(z.string()) }).nullable(),
   members: z.array(z.object({ role: z.string(), agentId: z.string(), title: z.string(), state: z.enum(["working", "done", "attention", "failed"]), task: z.string(), retired: z.boolean() })),
   /** The shared task board. */
@@ -406,4 +412,11 @@ export const teamPresetStartRpc = defineRpc({
     z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
     z.object({ ok: z.literal(true), file: z.string(), workspaceId: z.string(), orchestratorAgentId: z.string(), permission: z.string().nullable() }),
   ]),
+});
+
+/** The presets saved by this plugin under its former id, `paseo-agent-team`, so they can be imported once. */
+export const teamLegacyPresetsRpc = defineRpc({
+  name: "team.presets.legacy",
+  input: z.object({}),
+  output: z.object({ presets: z.array(PresetSchema) }),
 });

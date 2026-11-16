@@ -150,7 +150,8 @@ export function traceRun(before: Run | null, after: Run, actor: FlowParty = "plu
   for (const [agentId, paths] of byAgent(after.claims.filter((claim) => !had.has(key(claim))))) add("claims", "claim", "in", agentId, [], paths.join(", "));
   for (const [agentId, paths] of byAgent(prior.claims.filter((claim) => !has.has(key(claim))))) add("claims", "release", "in", agentId, [], paths.join(", "));
 
-  if (before && after.round > prior.round) {
+  // A team run's next round; a delegation run's next batch is its split instead.
+  if (before && after.round > prior.round && !delegation) {
     add("board", "round", "out", actor, after.members.filter((member) => member.state === "working").map((member) => member.agentId), String(after.round));
   }
   if (before && prior.status === "active" && after.status === "closed") add(delegation ? "summary" : "tasks", "close", "in", actor);

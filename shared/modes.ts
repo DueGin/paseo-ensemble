@@ -90,7 +90,9 @@ export const MEMBER_TOOLS = {
 export const ALL_TOOLS: readonly string[] = [...Object.values(LEAD_TOOLS), ...Object.values(MEMBER_TOOLS)];
 
 /** Prefix of every message the plugin sends to an agent, so intake checks can tell them from the user's own. */
-export const PLUGIN_MESSAGE_PREFIX = "[agent-team]";
+export const PLUGIN_MESSAGE_PREFIX = "[ensemble]";
+/** Plugin messages in sessions from before the rename to Ensemble start with this. */
+export const LEGACY_MESSAGE_PREFIX = "[agent-team]";
 
 /** Languages the plugin writes agent instructions in; the agents reply in it too. */
 export const PROMPT_LANGUAGES = ["zh", "en"] as const;

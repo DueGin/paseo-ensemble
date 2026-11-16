@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-A Paseo plugin (`paseo-plugin.json`, id `paseo-agent-team`) that turns a Paseo project into an agent team: each role gets its own provider/model, every role runs in the orchestrator's workspace (one workspace per team), and the orchestrator agent delegates to them. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the older single `.agents/team.json` is still read), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
+**Ensemble** (`paseo-plugin.json`, id `paseo-ensemble`, repository `DueGin/paseo-ensemble`) is a Paseo plugin that turns a Paseo project into an agent team. It began as a fork of `gyuha/paseo-agent-team` and is now maintained on its own; the old id was `paseo-agent-team`. It works like this: each role gets its own provider/model, every role runs in the orchestrator's workspace (one workspace per team), and the orchestrator agent delegates to them. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the older single `.agents/team.json` is still read), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
 
 ## Commands
 
@@ -16,8 +16,8 @@ PASEO_E2E=1 npx vitest run tests/daemon.e2e.test.ts   # live daemon; starts real
 PASEO_E2E=1 npx vitest run tests/collab.e2e.test.ts   # both collaboration modes with real agents; needs the plugin installed from this checkout
 
 paseo plugin install "$(pwd)"      # local install; then `paseo plugin ls` must show "running"
-paseo plugin reload paseo-agent-team
-paseo plugin logs paseo-agent-team
+paseo plugin reload paseo-ensemble
+paseo plugin logs paseo-ensemble
 ```
 
 There is no build or lint step; Paseo bundles the TypeScript sources itself on install. Do not restart the daemon to pick up changes; use `paseo plugin reload`.
@@ -27,7 +27,7 @@ There is no build or lint step; Paseo bundles the TypeScript sources itself on i
 Paseo plugins have two runtimes, each with one entry that default-exports a `contribute` function:
 
 - `index.server.ts` + `server/` run in a daemon subprocess. `server/team.ts` holds the team RPC handlers; `server/collab.ts` holds the collaboration runs: the agent tools attached to leads and members, the run store, and the lifecycle hooks that move runs along. `server/common.ts` has helpers both use. Handlers get `{ paseo }` (the Paseo SDK) and do the filesystem and agent work.
-- `index.client.tsx` + `client/` run inside the Paseo app (React Native, all platforms). It registers the team panel (`TeamPanel`), two dashboards from one component (`AgentDashboard`: the workspace's sessions, and `SessionDashboard`, an agent panel scoped to one session), an always-visible sidebar item and screen that lists every project's teams (`TeamScreen`), and Command Center items. `client/session-access.ts` adds the per-agent composer pills (Dashboard, Mode), the agent Command Center item and the `/dashboard` slash command.
+- `index.client.tsx` + `client/` run inside the Paseo app (React Native, all platforms). It registers the team panel (`TeamPanel`), two dashboards from one component (`AgentDashboard`: the workspace's sessions, and `SessionDashboard`, an agent panel scoped to one session; a team lead's session gets tabs for its overview, its agents, each component of the mode and the whole data flow, see `SessionTabs` in `client/RunComponents.tsx`), an always-visible sidebar item and screen that lists every project's teams (`TeamScreen`), and Command Center items. `client/session-access.ts` adds the per-agent composer pills (Dashboard, Mode), the agent Command Center item and the `/dashboard` slash command.
 - `shared/` is compiled into both and must stay pure (Zod contracts and plain values, no Node or React Native APIs). It holds the team schema (`team.ts`), RPC contracts (`rpc.ts`), provider/model validation (`validate.ts`), the planner and orchestrator prompts (`proposal.ts`, `prompt.ts`), workspace matching (`apply-plan.ts`), planner cleanup (`cleanup.ts`) and UI strings (`messages.ts`, English, Korean, Japanese and Simplified Chinese). Most logic lives here so it can be unit-tested without a daemon.
 
 The user-facing flow is propose → review → apply. Propose starts a planner agent with `outputSchema: TEAM_JSON_SCHEMA`. The client then polls `teamProposal`, which calls `waitForFinish(1000)` and parses the planner's last message. Apply re-validates, refuses workspaces another team of the project uses, writes the team's own file, reuses or creates the orchestrator's workspace matched by title, and then either tells a running orchestrator on the same provider/model to re-read the team or starts a new one. Finally it archives planner agents and an emptied `Team planner` workspace.
@@ -45,7 +45,7 @@ Data flow (`shared/flow.ts`): team runs use the components brief/tasks/plans/boa
 
 Team mode is complete in the "team" sense (lead + shared task board + mailbox): tasks (`T1`… with role, deps, files, state todo/doing/done/dropped, owner, optional plan, feedback) are claimed atomically (`claimTask`, also claims files), unlock when deps are done, are handed to idle members by `dispatchPlan`/`assignTasks`, and roles with ready work but no member are staffed (`unstaffedRoles` → `staff`). Posts addressed to roles/`lead`/`all` are "mail": appended to the recipient's next team tool result (`withMail`/`withLeadMail`, `inboxSeq`/`leadInboxSeq`) and wake idle recipients. Optional plan approval (`submitPlan`/`reviewPlan`; a pending plan keeps its task with the owner and blocks the round), rejection of done tasks (`rejectTask`), retiring members (`retireRole`) and `team_close`. Candidates: `candidates` in the team file are models, not roles; `name` is an optional handle (filled from the model by `fillCandidateNames` in the schema's preprocess), `notes` is the description (good at / must not do) the lead assigns work by. `roleSpec` resolves fixed roles, roles formed with `team_role` (stored in `.agents/runs/roles.json`, `SessionRole`), candidates by name (description becomes the member's notes), or `helper` only when there are no candidates, so no model outside the pool can be used.
 
-Global presets (`shared/presets.ts`): a host-scoped plugin settings document (`presetsSettings`, id `presets`) registered in `index.server.ts` and read in the client with `useSettings`. A preset is a mode + orchestrator model + candidate pool. `team.preset.start` (`startFromPreset`) writes the project's team from a preset (`presetToTeam`, with `preset: { id, name }` provenance) for a new workspace (title via `taskWorkspaceTitle` + `freeWorkspace`) or a free existing one, then runs `applyTeam` with `request`, which becomes the orchestrator's first prompt instead of the ready prompt. UI: `client/Presets.tsx` (library + start dialog) on the Agent teams screen; `SelectHost` in `TeamPanel.tsx` hosts the searchable picker for any editor.
+Global presets (`shared/presets.ts`): a host-scoped plugin settings document (`presetsSettings`, id `presets`) registered in `index.server.ts` and read in the client with `useSettings`. A preset is a mode + orchestrator model + candidate pool. `team.preset.start` (`startFromPreset`) writes the project's team from a preset (`presetToTeam`, with `preset: { id, name }` provenance) for a new workspace (title via `taskWorkspaceTitle` + `freeWorkspace`) or a free existing one, then runs `applyTeam` with `request`, which becomes the orchestrator's first prompt instead of the ready prompt. UI: `client/Presets.tsx` (library + start dialog, and the one-time import of presets saved under the old plugin id) on the Agent teams screen; `SelectHost` in `TeamPanel.tsx` hosts the searchable picker for any editor.
 
 Runs are JSON files in `<project>/.agents/runs/` (with a plugin-written `.gitignore`). `shared/collab.ts` is the pure state machine (members `working|attention|done|failed`, rounds, board posts, claims, tasks, `nextStep`); `RunStore` in `server/collab.ts` serializes mutations per run. Hooks (`agent.turn.after`, `agent.permission.*`, `agent.archive.after`) finish members and call `advance`, which starts the next team round or tells an idle lead. The plugin only ever `send`s to idle agents (a `send` interrupts a running turn). Decisions that send (start a round, notify the lead) are made inside `mutate` so racing callers act once, and `finishIfCurrent` ignores a turn end that predates the member's latest dispatch. `team_wait` and a 60-second sweep reconcile members whose events were missed.
 
@@ -53,7 +53,7 @@ Key details that span files:
 
 - A team belongs to the workspace in its `orchestrator.workspace`, matched by title (`shared/team-files.ts`). The panel of a workspace reads only that workspace's team, and the orchestrator prompt names only its own file.
 - Agents the plugin starts carry the label key `LABEL = "workspace-agents"` (`shared/cleanup.ts`) with value `planner`, `orchestrator` or `member`. Cleanup, orchestrator reuse and tool attachment depend on it, so do not rename it casually.
-- Every message the plugin sends to an agent starts with `PLUGIN_MESSAGE_PREFIX` (`[agent-team]`), so the intake check never mistakes it for the user's confirmation. Keep that when adding messages.
+- Every message the plugin sends to an agent starts with `PLUGIN_MESSAGE_PREFIX` (`[ensemble]`), so the intake check never mistakes it for the user's confirmation. Keep that when adding messages.
 - Session scoping of the dashboard (`sessionRootOf`, `sessionMembers`, `sessionForest`, `workspaceForest` in `shared/agent-tree.ts`) builds the project forest first and then picks trees, so filtering rules stay identical in both dashboards.
 - Agents get `modeId: "auto"` only when the provider's snapshot `modes` include `auto` (`autoModeOf`). Otherwise the provider's default mode applies.
 - `outputSchema` is not enforced by every provider, so `proposal.ts` also embeds an example of the exact shape in the prompt and parses defensively.
@@ -70,9 +70,15 @@ Key details that span files:
 - Team tools reach agents only with Paseo tools injected (`daemon.mcp.injectIntoAgents`, Settings → Orchestration → Enable Paseo tools), which is **off by default**. `teamToolsEnabled` reads it via `paseo.config.get()`; apply and restart refuse while it is off. The live daemon used for e2e has it on.
 - Paseo 0.15 gives a panel no way to learn which agent tab has focus (`useComposers({ focused })` is 0.16+ and exposes no agent id). The session is handed over from the agent's own context (pill, agent Command Center item, slash command) via `addAgentPanel` + `openPanel(..., { agentId, location: "explorer" })`.
 
+## Renamed from paseo-agent-team
+
+- Host settings are stored per plugin id, so presets saved under `paseo-agent-team` stay in `<PASEO_HOME>/plugin-settings/paseo-agent-team/presets.json`. `server/legacy.ts` reads them (`team.presets.legacy`), and the presets screen offers a one-time import while the new library is empty.
+- Plugin messages now start with `[ensemble]` (`PLUGIN_MESSAGE_PREFIX`); `confirmsBrief` also skips the old `[agent-team]` prefix (`LEGACY_MESSAGE_PREFIX`) so sessions from before the rename keep their intake check.
+- The agent labels `workspace-agents` and `agent-team-lang` keep their old names on purpose: running sessions are found by them.
+
 ## Publishing
 
-- Releases follow `.claude/skills/deploy/SKILL.md` ("배포해줘"): bump the version, tag, create a GitHub release, then open a PR on the registry record.
-- The registry listing is `gyuha/agent-team` in `getpaseo/plugins` (`plugins/gyuha/agent-team.json`). It pins one reviewed Git commit, so pushing to `main` does not update `paseo plugin add gyuha/agent-team`. Update it with a PR that changes the record's commit. Do not use `gh issue create --label submission`: the label is dropped for this account, and the intake bot skips unlabeled issues. A pin change requested only in a review-PR comment was not applied (#1526).
-- The pinned commit must contain `OVERVIEW.md`. Keep it factual, with no install instructions, and update it, and README "Limitations", when behaviour changes.
-- To test the latest `main` before review, install directly with `paseo plugin add git:gyuha/paseo-agent-team`. A local-directory install and a Git or registry install share the id `paseo-agent-team`, so `paseo plugin remove paseo-agent-team` first.
+- Releases follow `.claude/skills/deploy/SKILL.md`: bump the version, tag, push, check the tag installs on a throwaway daemon, then create a GitHub release on `DueGin/paseo-ensemble`.
+- There is no Paseo registry listing for Ensemble yet; install from Git with `paseo plugin add git:DueGin/paseo-ensemble`. The registry's `gyuha/agent-team` listing belongs to the original project and is not ours to update.
+- Keep `OVERVIEW.md` factual, with no install instructions, and update it, and the README's Limitations, when behaviour changes.
+- A local-directory install and a Git install share the id `paseo-ensemble`, so remove one before installing the other.
