@@ -86,7 +86,7 @@ describe("prompt-zh", () => {
     for (const tool of Object.values(LEAD_TOOLS)) expect(prompt).toContain(tool);
     expect(prompt).toContain(LANGUAGE_RULE);
     expect(prompt).toContain("- opus (claude/claude-opus-5-5)\n  Good at: architecture, hard bugs\n  Slow and expensive\n  Do not give it: routine edits");
-    expect(prompt).toContain("- sol (codex/gpt-6.1-sol)\n  （无描述）");
+    expect(prompt).toContain("- sol (codex/gpt-6.1-sol)\n  （无描述：通用成员，按它所用模型的能力分配工作）");
     expect(prompt).toContain("| design | codex/gpt-6.1-sol | src/ui, assets/images |");
     expect(prompt).toContain("2D platformer game");
     expect(prompt).toContain(file);

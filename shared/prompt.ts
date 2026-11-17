@@ -22,7 +22,7 @@ function teamTable(team: Team): string[] {
 function candidateList(team: Team): string[] {
   return team.candidates.flatMap((candidate) => [
     `- ${candidate.name} (${candidate.provider}/${candidate.model})`,
-    ...(candidate.notes.trim() ? candidate.notes.trim().split("\n").map((line) => `  ${line.trim()}`).filter((line) => line.trim()) : ["  (no description)"]),
+    ...(candidate.notes.trim() ? candidate.notes.trim().split("\n").map((line) => `  ${line.trim()}`).filter((line) => line.trim()) : ["  (no description: a general member; give it work its model suits)"]),
   ]);
 }
 
@@ -47,8 +47,8 @@ function modeRules(): string[] {
 function formingRules(): string[] {
   return [
     "## Assigning work to candidates",
-    "- A candidate is a model, not a job: nothing about it is fixed except what its description says. Decide who does what from the descriptions: give each piece of work to the candidate whose description says it is good at or suited for that kind of work, and weigh cost and speed when the description gives them.",
-    "- Treat what a description says a candidate must not do, or is not suited for, as a hard rule: never give it that work, also not as part of a larger task. When no candidate's description fits a piece of work, do it yourself or tell the user.",
+    "- A candidate is a model, not a job: nothing about it is fixed except what its description says. Decide who does what from the descriptions: give each piece of work to the candidate whose description says it is good at or suited for that kind of work, and weigh cost and speed when the description gives them. A candidate without a description is a general member: give it work its model is suited for.",
+    "- Treat what a description says a candidate must not do, or is not suited for, as a hard rule: never give it that work, also not as part of a larger task. When no candidate fits a piece of work, do it yourself or tell the user.",
     `- You can give work straight to a candidate by its name, as the role in ${T.delegate} or in a team task. A member then runs on that candidate, with the candidate's description as its notes.`,
     `- When the same model should take on a narrower job in this session (its own instructions or folders, or two jobs on one model), form a role with ${T.role}: a short lowercase name, the candidate, instructions and folders. A role can only run on a candidate's provider and model; there is no other way to pick a model. Calling ${T.role} again moves a role to another candidate; its old member is retired from a run in progress.`,
     "- Fixed roles stay available next to the candidates.",

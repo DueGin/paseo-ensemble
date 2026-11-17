@@ -75,7 +75,7 @@ describe("orchestratorPrompt", () => {
     ] }, file);
     expect(preset).toContain("No fixed roles: assign work to the candidate members below, by their descriptions.");
     expect(preset).toContain("- opus (claude/claude-opus-5-5)\n  Good at: architecture, hard bugs\n  Slow and expensive\n  Do not give it: routine edits");
-    expect(preset).toContain("- sol (codex/gpt-6.1-sol)\n  (no description)");
+    expect(preset).toContain("- sol (codex/gpt-6.1-sol)\n  (no description: a general member; give it work its model suits)");
     expect(preset).toMatch(/A candidate is a model, not a job/);
     expect(preset).toMatch(/must not do, or is not suited for, as a hard rule: never give it that work/);
     expect(preset).toMatch(/give work straight to a candidate by its name/);
