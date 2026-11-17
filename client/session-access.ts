@@ -3,14 +3,14 @@
 // which agent tab has focus, so the session is handed over from the agent's own context.
 import type { PluginButtonMenuEntry, PluginButtonRegistration, PluginClientContext, PluginMessage, PluginText } from "@getpaseo/plugin/client";
 import { parentOf, sessionRootOf, type DashboardAgent } from "../shared/agent-tree";
-import { LABEL } from "../shared/cleanup";
+import { agentJob } from "../shared/cleanup";
 import { TEAM_MODES, type CollabMode, type TeamMode } from "../shared/modes";
 import { teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
 import { messages } from "./i18n";
 
 export const SESSION_PANEL = "session-dashboard";
 
-type Agent = Pick<DashboardAgent, "id" | "workspaceId" | "labels" | "archivedAt" | "parentAgentId" | "createdAt"> & { provider: string; status: string };
+type Agent = Pick<DashboardAgent, "id" | "workspaceId" | "labels" | "metadata" | "archivedAt" | "parentAgentId" | "createdAt"> & { provider: string; status: string };
 
 const PILL_LABEL: Record<TeamMode, PluginMessage> = {
   auto: messages.message("mode.pillAuto"),
@@ -68,7 +68,7 @@ export function contributeSessionAccess(client: PluginClientContext): () => void
   const refreshedAt = new Map<string, number>();
 
   const collaborating = (agent: Agent) =>
-    agent.labels[LABEL] === "orchestrator" || agent.labels[LABEL] === "member" || parentOf(agent as DashboardAgent) !== undefined ||
+    agentJob(agent) === "orchestrator" || agentJob(agent) === "member" || parentOf(agent as DashboardAgent) !== undefined ||
     [...agents.values()].some((other) => parentOf(other as DashboardAgent) === agent.id);
 
   const modeMenu = (agentId: string): readonly PluginButtonMenuEntry<PluginText>[] =>
@@ -115,7 +115,7 @@ export function contributeSessionAccess(client: PluginClientContext): () => void
     }
     for (const [id, pill] of modePills) {
       const agent = agents.get(id);
-      if (!agent || agent.archivedAt || agent.labels[LABEL] !== "orchestrator") {
+      if (!agent || agent.archivedAt || agentJob(agent) !== "orchestrator") {
         pill.remove();
         modePills.delete(id);
       }
@@ -136,7 +136,7 @@ export function contributeSessionAccess(client: PluginClientContext): () => void
           },
         }));
       }
-      if (agent.labels[LABEL] === "orchestrator") {
+      if (agentJob(agent) === "orchestrator") {
         if (!modePills.has(agent.id)) {
           modePills.set(agent.id, client.addComposerPill({
             id: "session-mode",

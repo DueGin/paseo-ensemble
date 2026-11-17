@@ -1,5 +1,7 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { AgentDashboard, SessionDashboard } from "./client/AgentDashboard";
+import { contributeDraftTeam } from "./client/DraftTeam";
+import { contributeTeamBadge } from "./client/TeamBadge";
 import { messages } from "./client/i18n";
 import { contributeSessionAccess, SESSION_PANEL } from "./client/session-access";
 import { TeamPanel } from "./client/TeamPanel";
@@ -23,5 +25,14 @@ export default function contribute(client: PluginClientContext) {
       openPanel("team");
     },
   });
-  return contributeSessionAccess(client);
+  // Paseo 0.16: pick a team in a new agent's own draft composer, and that agent becomes its lead.
+  const removeDraftTeam = contributeDraftTeam(client);
+  // Paseo 0.16: a badge on the sidebar's workspace rows that run a team.
+  const removeTeamBadge = contributeTeamBadge(client);
+  const removeSessionAccess = contributeSessionAccess(client);
+  return () => {
+    removeDraftTeam();
+    removeTeamBadge();
+    removeSessionAccess();
+  };
 }

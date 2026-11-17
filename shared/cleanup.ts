@@ -1,5 +1,6 @@
 import { planWorkspaces, workspaceLabel, type WorkspaceRef } from "./apply-plan";
 import type { Team } from "./team";
+import { leadMetaOf } from "./draft-lead";
 import { LANGUAGE_LABEL } from "./modes";
 
 /** Label key on the agents this plugin starts; the value is the agent's job: planner, orchestrator or member. */
@@ -29,7 +30,19 @@ export interface AgentRef {
   id: string;
   workspaceId?: string | null;
   labels: Record<string, string>;
+  /** Plugin data on the agent; a lead started from a new-agent draft is known by it (see draft-lead.ts). */
+  metadata?: Readonly<Record<string, unknown>> | null;
   archivedAt?: string | null;
+}
+
+/** An agent's job on a team: planner, orchestrator or member, from its label or, for a draft lead, its metadata. */
+export function agentJob(agent: Pick<AgentRef, "labels" | "metadata">): string | undefined {
+  return agent.labels[LABEL] ?? (leadMetaOf(agent.metadata) ? "orchestrator" : undefined);
+}
+
+/** The language an agent of the team works in, when it has one. */
+export function agentLanguage(agent: Pick<AgentRef, "labels" | "metadata">): string | undefined {
+  return agent.labels[LANGUAGE_LABEL] ?? leadMetaOf(agent.metadata)?.language;
 }
 
 /**
@@ -61,19 +74,19 @@ export function findOrchestrator(agents: readonly OrchestratorCandidate[], works
   return agents.find(
     (agent) =>
       agent.workspaceId === workspaceId &&
-      agent.labels[LABEL] === "orchestrator" &&
+      agentJob(agent) === "orchestrator" &&
       !agent.archivedAt &&
       agent.provider === team.orchestrator.provider &&
       agent.model === team.orchestrator.model &&
       (modeId === undefined || agent.currentModeId === modeId) &&
       // Its instructions and tools are in the language it started with; another language needs a new lead.
-      (agent.labels[LANGUAGE_LABEL] ?? "en") === (team.language ?? "en"),
+      (agentLanguage(agent) ?? "en") === (team.language ?? "en"),
   );
 }
 
 /** The unarchived orchestrators of the workspace, whatever their provider, model or mode; a restart archives them all. */
 export function orchestratorsToArchive(agents: readonly AgentRef[], workspaceId: string): string[] {
-  return agents.filter((agent) => agent.workspaceId === workspaceId && agent.labels[LABEL] === "orchestrator" && !agent.archivedAt).map((agent) => agent.id);
+  return agents.filter((agent) => agent.workspaceId === workspaceId && agentJob(agent) === "orchestrator" && !agent.archivedAt).map((agent) => agent.id);
 }
 
 /**
@@ -82,7 +95,7 @@ export function orchestratorsToArchive(agents: readonly AgentRef[], workspaceId:
  */
 export function teamAgentsToArchive(agents: readonly AgentRef[], workspaceIds: readonly string[], roles: readonly string[]): string[] {
   const names = new Set(roles.map((role) => role.toLowerCase()));
-  const own = (agent: AgentRef) => agent.labels[LABEL] === "orchestrator" || agent.labels[LABEL] === "member" || names.has((agent.labels.role ?? "").toLowerCase());
+  const own = (agent: AgentRef) => agentJob(agent) === "orchestrator" || agentJob(agent) === "member" || names.has((agent.labels.role ?? "").toLowerCase());
   return agents
     .filter((agent) => !agent.archivedAt && ((workspaceIds.includes(agent.workspaceId ?? "") && own(agent)) || (agent.labels[LABEL] === "planner" && workspaceIds.includes(agent.labels[PROPOSAL_FOR] ?? ""))))
     .map((agent) => agent.id);

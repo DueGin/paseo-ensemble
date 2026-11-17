@@ -6,17 +6,18 @@ import type { RpcOutput } from "@getpaseo/plugin";
 import { createPaseoClient, type PaseoClient } from "@getpaseo/client";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RUNS_DIR } from "../server/collab";
 import { applyTeam, proposeTeam, teamProposal } from "../server/team";
 import { LABEL } from "../shared/cleanup";
+import { DRAFT_TEAM, LEAD_META } from "../shared/draft-lead";
 import { excerpt, type Run } from "../shared/collab";
 import type { TeamMode } from "../shared/modes";
 import type { teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
-import { TeamSchema, type Team } from "../shared/team";
+import { serializeTeam, TeamSchema, type Team } from "../shared/team";
 
 /** The installed plugin to call, from this checkout's manifest. */
 const PLUGIN_ID = (JSON.parse(readFileSync(join(__dirname, "..", "paseo-plugin.json"), "utf8")) as { id: string }).id;
@@ -289,6 +290,24 @@ describe.skipIf(!process.env.PASEO_E2E)("collaboration modes against the local d
     }
     throw new Error("the planner did not finish");
   }, 900_000);
+
+  it("makes an agent started from a new-agent draft with a team picked its lead, and refuses a workspace without a team (Paseo 0.16)", async () => {
+    const workspace = await paseo.workspaces.create({ title: "drafted", source: { kind: "directory", path: root } });
+    writeFileSync(join(root, ".agents/teams/drafted.json"), serializeTeam({ ...team(), orchestrator: { ...team().orchestrator, workspace: "drafted" } }));
+    // What the composer's Team control writes into the draft.
+    const drafted = await paseo.workspaces.ref(workspace.id).agents.create({
+      config: { provider: `${provider}/${model}` },
+      prompt: "Create notes/drafted.txt containing the word hi. Delegate it to the role that owns notes/, wait for it, then report briefly.",
+      metadata: { [DRAFT_TEAM]: { source: "workspace", locale: "en" } },
+    });
+    await paseo.agents.ref(drafted.id).waitForFinish(600_000);
+    const run = await settle("delegation", 600_000, drafted.id);
+    expect(run.members.map((member) => member.role)).toContain("writer");
+    expect(existsSync(join(root, "notes/drafted.txt"))).toBe(true);
+    expect((await paseo.agents.ref(drafted.id).refresh())?.agent.metadata?.[LEAD_META]).toMatchObject({ language: "en", file: ".agents/teams/drafted.json", instructed: true });
+    const bare = await paseo.workspaces.create({ title: "no team here", source: { kind: "directory", path: root } });
+    await expect(paseo.workspaces.ref(bare.id).agents.create({ config: { provider: `${provider}/${model}` }, prompt: "hi", metadata: { [DRAFT_TEAM]: { source: "workspace", locale: "en" } } })).rejects.toThrow(/has no team yet/);
+  }, 1_500_000);
 
   it("assigns work to unnamed candidates by their descriptions, and keeps what a description rules out away from them", async () => {
     const workspace = await paseo.workspaces.create({ title: "described", source: { kind: "directory", path: root } });

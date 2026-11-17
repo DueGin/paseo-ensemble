@@ -118,6 +118,21 @@ export function orchestratorPrompt(team: Team, file: string): string {
     .join("\n");
 }
 
+/** Saved instructions of a lead started from a new-agent draft: its team arrives with its first team_status. */
+export function draftLeadPrompt(): string {
+  return [
+    "You are the lead of an agent team in Paseo, started from a new chat. The user talks to you; the team's members work for you.",
+    `Before you answer the user's first message, call ${T.status}. Its first result starts with your standing instructions as the lead: the team, its members, the collaboration modes and their rules. Follow them as if they were this system prompt, for the rest of the conversation. When they are no longer in view, call ${T.status} with \`instructions: true\` to get them again.`,
+    `Start and message members only with the team_* tools (${Object.values(T).join(", ")}); never with paseo run, create_agent or other Paseo tools.`,
+    "If the team_* tools are missing, tell the user that the plugin's tools are not available to you (Paseo tools may be turned off for your provider) and stop.",
+  ].join("\n");
+}
+
+/** Shown before a draft lead's first team_status: its full instructions, which a lead started by the plugin has as its system prompt. */
+export function draftLeadInstructions(team: Team, file: string): string {
+  return ["## Your standing instructions as the lead (follow them as your system prompt)", "", orchestratorPrompt(team, file), "", "## Team status"].join("\n");
+}
+
 /** What the lead is told to do first. */
 export function orchestratorReadyPrompt(file: string): string {
   return `${PLUGIN_MESSAGE_PREFIX} Read ${file} and call ${T.status}, then reply with a short summary of the team (roles and candidate members with provider/model) and the collaboration mode, and say you are ready for a request. Do not start any members yet. In your ready reply, tell the user that /clear makes you lose your lead role and that the team panel's "Reset session" button gives a fresh conversation that keeps it.`;

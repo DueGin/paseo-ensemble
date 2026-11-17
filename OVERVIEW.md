@@ -19,8 +19,8 @@ team:       request → intake with you → confirmed brief → members on a sha
 
 ## Requirements
 
-- Paseo 0.15.0 or newer, and at least one ready provider on the host.
-- Paseo tools turned on for agents: Settings → Orchestration → **Enable Paseo tools** (off by default in Paseo 0.15). The orchestrator and members use the plugin's team tools, which Paseo serves next to its own tools. The team panel warns, and Apply and Reset session refuse, while it is off.
+- Paseo 0.16.0 or newer, and at least one ready provider on the host.
+- Paseo tools turned on for agents: Settings → Orchestration → **Enable Paseo tools** (off by default). The orchestrator and members use the plugin's team tools, which Paseo serves next to its own tools. The team panel warns, and Apply and Reset session refuse, while it is off.
 
 ## Creating a team
 
@@ -48,6 +48,10 @@ Apply does four things in order:
 4. Archives the project's plugin-labelled planner agents and any unused, otherwise empty `Team planner` workspace. If cleanup fails, the team is still applied and the failure is shown as a warning.
 
 Apply may also write the allow rules described under Agent modes and permissions. After Apply you are taken to the orchestrator's workspace.
+
+## Starting a team from a new chat
+
+A new agent's draft and the New workspace screen have a **Team** control in the composer: no team, the workspace's own team, or a global preset. With a team picked, the agent that the draft creates becomes the team's lead: it gets the lead's tools when it opens, and its standing instructions with its first team status. A preset picks its lead model and is written as the workspace's team file; a workspace that already runs another team refuses it. Picking "this workspace's team" where there is none refuses to start the agent and says what to do. A **Team mode** control sets the session's mode. When Paseo renames a new workspace (it is first titled with the prompt), the lead's team follows the new title. Workspaces that run a team show a badge in the sidebar: the mode, or how many members are working or need you.
 
 ## Working with the orchestrator
 
@@ -178,7 +182,7 @@ English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-si
 - **Limits.** A team run has at most 8 members; the plugin hands a member at most 6 tasks and wakes it for messages at most 3 times per round, after which the orchestrator decides.
 - **Tools must reach the agents.** The orchestrator and members need the plugin's team tools. If Paseo tools are turned off for a provider, the orchestrator says so and stops; a member without the board tools reports in its final reply, which the plugin puts on the board.
 - **Model scope.** A role's model applies to members the plugin starts. Agents you start yourself in the team's workspace from Paseo's own UI still use whatever model you pick there.
-- **Session focus.** Paseo 0.15 doesn't tell a sidebar panel which chat has focus. The session dashboard follows the session it was opened from; open it again from another chat, or pick a session in the Agent dashboard's **Sessions** row.
+- **Session focus.** Paseo doesn't tell a sidebar panel which chat has focus. The session dashboard follows the session it was opened from; open it again from another chat, or pick a session in the Agent dashboard's **Sessions** row.
 - **Run timing.** The plugin moves a run along from Paseo's turn events. If the plugin was reloaded while members worked, the orchestrator's next wait catches up on members that finished meanwhile. A wait returns after at most 9 minutes; the orchestrator then waits again or answers you, and the plugin tells it when the run has finished.
 - **Workspace matching.** A team is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team until the two match again. After renaming in Paseo, press **Reconnect** on the team's row, or edit `orchestrator.workspace` in the file.
 - **Older team files.** A team file without a mode runs in delegation mode. A file written by an older version may still list a workspace for a role; Apply removes it.

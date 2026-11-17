@@ -7,7 +7,8 @@ import { readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { workspaceLabel } from "../shared/apply-plan";
-import { LABEL } from "../shared/cleanup";
+import { agentJob, agentLanguage, LABEL } from "../shared/cleanup";
+import { draftTeamOf, LEAD_META, leadMetaOf, type LeadMeta } from "../shared/draft-lead";
 import {
   addBatch, addPost, addTasks, assignTasks, attachPacket, batchToSummarize, summarizeBatch, boardPage, briefPosition, briefText, claimPaths, claimTask, completeTask, confirmsBrief, conversationFrom, createRun, DEFAULT_TEAM_ROUNDS,
   excerpt, finishMember, inboxOf, inboxText, leadInbox, markCollected, markInbox, markPlansNotified, MAX_NUDGES, MAX_ROUNDS, MAX_TEAM_SIZE,
@@ -23,12 +24,14 @@ import {
 import type { ProjectRef } from "../shared/projects";
 import type { RoleNote } from "../shared/prompt";
 import { promptsFor } from "../shared/prompts";
-import type { teamSessionDetailRpc, teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
-import type { Team } from "../shared/team";
+import type { teamBadgesRpc, teamSessionDetailRpc, teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
+import { serializeTeam, type Team } from "../shared/team";
 import { teamIn } from "../shared/team-files";
 import { agentModeOf } from "../shared/validate";
 import { logEvents, traceRun, type FlowParty, type NewEvent } from "../shared/flow";
 import { allProjects, featuresFor, projectTeams, providerEntries, sleep, writeFileAtomic, type PaseoApi } from "./common";
+import { draftCreateRequest, prepareDraftLead } from "./draft";
+import type { Preset } from "../shared/presets";
 
 /** Run files live in the project, beside the team files, but are kept out of git. */
 export const RUNS_DIR = ".agents/runs";
@@ -59,7 +62,9 @@ export interface SessionRole {
 }
 
 const now = () => new Date().toISOString();
-const ok = (text: string, structuredContent?: unknown): AgentToolResult => ({ text, ...(structuredContent === undefined ? {} : { structuredContent }) });
+// Text only: from Paseo 0.16 an agent that gets structuredContent sees it instead of the text, and the text is what
+// carries the team, the board and the instructions. The structured value is kept for readers of this code.
+const ok = (text: string, _structured?: unknown): AgentToolResult => ({ text });
 const fail = (text: string): AgentToolResult => ({ isError: true, text });
 const key = (value: string) => value.trim().toLowerCase();
 
@@ -314,13 +319,27 @@ interface LeadContext {
   sessionRoles: SessionRole[];
 }
 
-async function leadContext(paseo: PaseoApi, lead: { id: string; workspaceId: string | null }): Promise<LeadContext> {
+/** The team file of each lead started from a new-agent draft, by lead id; such a lead's team is its own file, not the workspace title's. */
+const draftLeadFiles = new Map<string, string>();
+
+async function leadContext(paseo: PaseoApi, lead: { id: string; workspaceId: string | null; metadata?: Readonly<Record<string, unknown>> | null }): Promise<LeadContext> {
   const { entries } = await paseo.workspaces.list();
   const workspace = entries.find((entry) => entry.id === lead.workspaceId);
   if (!workspace) throw new Error("Your workspace was not found in Paseo.");
   const project: ProjectRef = { id: workspace.projectId, name: workspace.projectCustomName || workspace.projectDisplayName, root: workspace.projectRootPath };
   const title = workspaceLabel(workspace);
-  const own = teamIn((await projectTeams(project)).teams, title);
+  const fromMeta = leadMetaOf(lead.metadata)?.file;
+  if (fromMeta) draftLeadFiles.set(lead.id, fromMeta);
+  const leadFile = fromMeta ?? draftLeadFiles.get(lead.id);
+  const { teams } = await projectTeams(project);
+  let own = (leadFile ? teams.find((entry) => entry.file === leadFile) : undefined) ?? teamIn(teams, title);
+  // A draft lead knows its team by file, and its workspace by id: when Paseo renamed the workspace (a New workspace is
+  // titled with the prompt first), the team follows it, as Reconnect would, unless another team has that title.
+  if (own && leadFile && own.file === leadFile && key(own.team.orchestrator.workspace) !== key(title) && !teams.some((entry) => entry !== own && key(entry.team.orchestrator.workspace) === key(title))) {
+    const moved = { ...own.team, orchestrator: { ...own.team.orchestrator, workspace: title } };
+    await writeFileAtomic(join(project.root, own.file), serializeTeam(moved));
+    own = { ...own, team: moved };
+  }
   if (!own) throw new Error(`No team file in .agents/teams/ runs in the workspace "${title}". Ask the user to apply the team again in the Agent team panel.`);
   await store.load(project.root);
   await store.readSessions(project.root);
@@ -378,6 +397,7 @@ interface AgentLike {
   model?: string | null;
   status: string;
   labels: Record<string, string>;
+  metadata?: Readonly<Record<string, unknown>> | null;
   archivedAt?: string | null;
   parentAgentId?: string | null;
   createdAt: string;
@@ -390,7 +410,7 @@ const parentOf = (agent: AgentLike) => agent.parentAgentId ?? agent.labels[PAREN
 async function reusableMember(paseo: PaseoApi, ctx: LeadContext, leadId: string, spec: MemberSpec, lang: PromptLanguage): Promise<AgentLike | "busy" | null> {
   const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent as unknown as AgentLike);
   const candidates = agents
-    .filter((agent) => !agent.archivedAt && agent.workspaceId === ctx.workspaceId && agent.labels[LABEL] === "member" && key(agent.labels.role ?? "") === key(spec.name) && agent.provider === spec.provider && agent.model === spec.model && (agent.labels[LANGUAGE_LABEL] ?? "en") === lang)
+    .filter((agent) => !agent.archivedAt && agent.workspaceId === ctx.workspaceId && agentJob(agent) === "member" && key(agent.labels.role ?? "") === key(spec.name) && agent.provider === spec.provider && agent.model === spec.model && (agent.labels[LANGUAGE_LABEL] ?? "en") === lang)
     .sort((a, b) => Number(parentOf(b) === leadId) - Number(parentOf(a) === leadId) || b.createdAt.localeCompare(a.createdAt));
   const idle = candidates.find((agent) => agent.status !== "running" && agent.status !== "initializing" && agent.status !== "closed" && agent.status !== "error");
   if (idle) return idle;
@@ -916,14 +936,23 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       "The team's roles and candidate members, this session's collaboration mode (team, delegation, auto or none), the roles you formed and the run in progress. Call it before acting on each request.",
       "团队的角色和候选成员、本会话的协作模式（团队、委派、自动或无）、你建的角色以及进行中的运行。处理每个需求前先调用它。",
     ),
-    input: z.object({}),
-    async execute(_input, { agent, paseo }) {
+    input: z.object({
+      instructions: z.boolean().optional().describe(tr("Also return your standing instructions as the lead again (for a lead started from a new chat, when they are no longer in view)", "同时再次返回你作为协调器的常驻说明（从新会话启动的协调器，在看不到它们时使用）")),
+    }),
+    async execute({ instructions }, { agent, paseo }) {
       const ctx = await leadContext(paseo, agent);
+      // A lead started from a new-agent draft has no team in its saved instructions; the first status gives it them.
+      const draftLead = leadMetaOf(agent.metadata);
+      const instruct = draftLead !== null && (instructions === true || !draftLead.instructed);
+      if (draftLead && !draftLead.instructed) {
+        await paseo.agents.ref(agent.id).setMetadata({ [LEAD_META]: leadRecord({ ...draftLead, file: draftLead.file ?? ctx.file, instructed: true }) }).catch((error) => console.error(`[ensemble] marking ${agent.id} instructed failed`, error));
+      }
       const run = store.leadRun(agent.id, false);
       const source = ctx.locked
         ? tr(" (auto settled on it; locked for this session)", "（自动模式已确定，本会话锁定）")
         : ctx.override ? tr(` (switched by the user for this session; the team file says ${ctx.team.mode})`, `（用户为本会话切换；团队文件设置为 ${modeName(ctx.team.mode)}）`) : tr(" (from the team file)", "（来自团队文件）");
       return leadMail(agent.id, ok([
+        ...(instruct ? [promptsFor(draftLead.language).draftLeadInstructions(ctx.team, ctx.file), ""] : []),
         tr(`Team file: ${ctx.file}`, `团队文件：${ctx.file}`) + (ctx.team.goal.trim() ? tr(` · goal: ${ctx.team.goal.trim()}`, ` · 目标：${ctx.team.goal.trim()}`) : ""),
         tr(`Mode: ${ctx.effective}${source}.`, `模式：${modeName(ctx.effective)}${source}。`),
         MODE_HINT[ctx.effective],
@@ -1713,11 +1742,30 @@ export const memberTools: AgentToolDefinition[] = TOOLSETS.en.member;
 // ---------------------------------------------------------------------------------------------------------------------
 // Hooks and RPC
 
-export function contributeCollaboration(server: PluginServerContext): () => void {
+/** JSON for agent metadata: a lead's record without unset fields. */
+const leadRecord = (lead: LeadMeta) => Object.fromEntries(Object.entries(lead).filter(([, value]) => value !== undefined)) as Record<string, string | boolean>;
+
+export function contributeCollaboration(server: PluginServerContext, readPresets: () => Promise<readonly Preset[]>): () => void {
+  // A new-agent draft with a team picked in its composer becomes a lead (see server/draft.ts).
+  server.addHook("agent.create.before", async ({ request }) => (draftTeamOf(request.metadata) ? draftCreateRequest(request, await readPresets()) : undefined));
   server.addHook("agent.open.before", async ({ request }, { paseo }) => {
     startSweep(paseo);
-    const job = request.labels[LABEL];
-    const tools = toolsFor(request.labels[LANGUAGE_LABEL]);
+    if (request.reason === "create" && draftTeamOf(request.metadata)) {
+      const setup = await prepareDraftLead(paseo, request, await readPresets());
+      if (setup) {
+        draftLeadFiles.set(request.agentId, setup.file);
+        if (setup.mode) {
+          await store.readSessions(setup.root);
+          await store.setSessionMode(setup.root, request.agentId, setup.mode);
+        }
+        // The open hook can't change metadata, and awaiting a write to the agent being opened deadlocks: record the team
+        // file right after the open. Until then, and across plugin reloads, draftLeadFiles knows it.
+        void paseo.agents.ref(request.agentId).setMetadata({ [LEAD_META]: leadRecord(setup.lead) }).catch((error) => console.error(`[ensemble] recording the team of ${request.agentId} failed`, error));
+        return { ...request, tools: [...request.tools, ...toolsFor(setup.lead.language).lead] };
+      }
+    }
+    const job = agentJob(request);
+    const tools = toolsFor(agentLanguage(request));
     if (job === "orchestrator") return { ...request, tools: [...request.tools, ...tools.lead] };
     if (job === "member") return { ...request, tools: [...request.tools, ...tools.member] };
     return undefined;
@@ -1755,11 +1803,11 @@ export function contributeCollaboration(server: PluginServerContext): () => void
 async function leadOf(paseo: PaseoApi, agentId: string): Promise<AgentLike | null> {
   const agent = await agentStatus(paseo, agentId);
   if (!agent) return null;
-  if (agent.labels[LABEL] === "orchestrator") return agent;
+  if (agentJob(agent) === "orchestrator") return agent;
   const parent = parentOf(agent);
-  if (agent.labels[LABEL] === "member" && parent) {
+  if (agentJob(agent) === "member" && parent) {
     const lead = await agentStatus(paseo, parent);
-    return lead?.labels[LABEL] === "orchestrator" ? lead : null;
+    return lead && agentJob(lead) === "orchestrator" ? lead : null;
   }
   return null;
 }
@@ -1827,7 +1875,7 @@ function pendingView(pending: PendingBrief | null): RpcOutput<typeof teamSession
 export async function sessionDetail({ agentId }: RpcInput<typeof teamSessionDetailRpc>, { paseo }: { paseo: PaseoApi }): Promise<RpcOutput<typeof teamSessionDetailRpc>> {
   const lead = await leadOf(paseo, agentId);
   if (!lead) return { leadAgentId: null, pendingBrief: null, run: null };
-  const ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null }).catch(() => null);
+  const ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null, metadata: lead.metadata }).catch(() => null);
   const run = store.leadRun(lead.id, false);
   const pending = ctx ? await store.pendingBrief(ctx.project.root, lead.id) : null;
   const agents = run ? (await paseo.agents.list().catch(() => ({ entries: [] }))).entries.map((entry) => entry.agent as unknown as AgentLike) : [];
@@ -1839,7 +1887,7 @@ export async function sessionInfo({ agentId }: RpcInput<typeof teamSessionRpc>, 
   const none = { leadAgentId: null, configured: null, override: null, locked: null, effective: null, run: null, roles: [], pendingBrief: null };
   const lead = await leadOf(paseo, agentId);
   if (!lead) return none;
-  const ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null }).catch(() => null);
+  const ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null, metadata: lead.metadata }).catch(() => null);
   if (!ctx) return { ...none, leadAgentId: lead.id };
   const run = store.leadRun(lead.id, false);
   const pending = await store.pendingBrief(ctx.project.root, lead.id);
@@ -1860,7 +1908,7 @@ export async function setSessionMode({ agentId, mode }: RpcInput<typeof teamSess
   if (!lead) return { ok: false, errors: ["This agent is not a team's lead."] };
   let ctx: LeadContext;
   try {
-    ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null });
+    ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null, metadata: lead.metadata });
   } catch (error) {
     return { ok: false, errors: [error instanceof Error ? error.message : String(error)] };
   }
@@ -1868,7 +1916,33 @@ export async function setSessionMode({ agentId, mode }: RpcInput<typeof teamSess
   // Picking the team file's own mode clears the override, so later edits of the file apply again.
   const next = mode === ctx.team.mode ? null : mode;
   await store.setSessionMode(ctx.project.root, lead.id, next);
-  const lang = isPromptLanguage(lead.labels[LANGUAGE_LABEL]) ? lead.labels[LANGUAGE_LABEL] : ctx.team.language ?? "en";
+  const leadLanguage = agentLanguage(lead);
+  const lang = isPromptLanguage(leadLanguage) ? leadLanguage : ctx.team.language ?? "en";
   const notified = await sendIfIdle(paseo, lead.id, promptsFor(lang).modeChangedPrompt(next, ctx.team.mode)).catch(() => false);
   return { ok: true, effective: effectiveMode(ctx.team.mode, next), notified };
+}
+
+/** The workspaces that run a team, for the badges on the sidebar's workspace rows. */
+export async function workspaceBadges(_input: RpcInput<typeof teamBadgesRpc>, { paseo }: { paseo: PaseoApi }): Promise<RpcOutput<typeof teamBadgesRpc>> {
+  await store.loadAll(paseo).catch(() => undefined);
+  const { entries } = await paseo.workspaces.list();
+  const live = entries.filter((entry) => !entry.archivingAt);
+  const badges: RpcOutput<typeof teamBadgesRpc> = {};
+  const roots = new Map<string, typeof live>();
+  for (const entry of live) roots.set(entry.projectRootPath, [...(roots.get(entry.projectRootPath) ?? []), entry]);
+  for (const [root, workspaces] of roots) {
+    const { teams } = await projectTeams({ id: workspaces[0]!.projectId, name: workspaces[0]!.projectDisplayName, root }).catch(() => ({ teams: [] }));
+    for (const workspace of workspaces) {
+      const own = teamIn(teams, workspaceLabel(workspace));
+      if (own) badges[workspace.id] = { mode: own.team.mode, working: 0, attention: 0 };
+    }
+  }
+  for (const run of store.activeRuns()) {
+    const badge = run.workspaceId ? badges[run.workspaceId] : undefined;
+    if (!badge) continue;
+    const members = run.members.filter((member) => !member.retired);
+    badge.working += members.filter((member) => member.state === "working").length;
+    badge.attention += members.filter((member) => member.state === "attention").length;
+  }
+  return badges;
 }

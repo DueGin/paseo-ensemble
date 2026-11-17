@@ -131,6 +131,22 @@ export function orchestratorPrompt(team: Team, file: string): string {
     .join("\n");
 }
 
+/** 从新建会话的草稿启动的协调器所保存的说明：团队信息在它第一次调用团队状态工具时给出。 */
+export function draftLeadPrompt(): string {
+  return [
+    "你是 Paseo 里一支智能体团队的协调器（lead），从一个新会话启动。用户和你对话；团队成员为你工作。",
+    LANGUAGE_RULE,
+    `回复用户的第一条消息之前，先调用 ${T.status}。它第一次返回的结果开头是你作为协调器的常驻说明：团队、成员、协作模式及其规则。把它当作本系统提示的一部分，在整段对话中遵守。看不到这些说明时，用 \`instructions: true\` 调用 ${T.status} 再取一次。`,
+    `只用 team_* 工具（${Object.values(T).join("、")}）启动成员和给成员发消息；不要用 paseo run、create_agent 或其他 Paseo 工具。`,
+    "如果没有 team_* 工具，告诉用户插件的工具对你不可用（可能是 Paseo 工具对你的 provider 关闭了），然后停止。",
+  ].join("\n");
+}
+
+/** 协调器第一次调用团队状态工具时附上的完整说明；由插件启动的协调器把它作为系统提示。 */
+export function draftLeadInstructions(team: Team, file: string): string {
+  return ["## 你作为协调器的常驻说明（当作系统提示遵守）", "", orchestratorPrompt(team, file), "", "## 团队状态"].join("\n");
+}
+
 /** What the lead is told to do first. */
 export function orchestratorReadyPrompt(file: string): string {
   return `${PLUGIN_MESSAGE_PREFIX} 阅读 ${file} 并调用 ${T.status}，然后简要总结团队（角色和候选成员，以及各自的 provider/模型）和协作模式，并说明你已准备好接收请求。暂时不要启动任何成员。在这条就绪回复中告诉用户：/clear 会让你失去协调器的角色，而团队面板中的「重置会话」（Reset session）按钮可以开始一段新对话并保留这个角色。请用简体中文回复。`;

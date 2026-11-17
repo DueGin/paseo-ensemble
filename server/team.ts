@@ -263,7 +263,7 @@ async function archivePlanners(paseo: PaseoApi, targets: { agents: string[]; wor
  * Lets the team's Claude agents call the plugin's team tools without asking Claude's Auto-mode reviewer, which could
  * deny starting a member in an unattended mode. Returns the settings file when a rule was added, null when none was.
  */
-async function allowTeamTools(project: ProjectRef, rules: readonly string[]): Promise<{ ok: true; file: string | null } | { ok: false; errors: string[] }> {
+export async function allowTeamTools(project: ProjectRef, rules: readonly string[]): Promise<{ ok: true; file: string | null } | { ok: false; errors: string[] }> {
   if (!rules.length) return { ok: true, file: null };
   const file = join(project.root, CLAUDE_LOCAL_SETTINGS);
   const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {

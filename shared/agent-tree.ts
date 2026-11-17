@@ -1,4 +1,4 @@
-import { LABEL } from "./cleanup";
+import { agentJob } from "./cleanup";
 
 /** Label Paseo puts on an agent started by another agent; the snapshot has no parent field. */
 const PARENT_LABEL = "paseo.parent-agent-id";
@@ -18,6 +18,7 @@ export interface DashboardAgent {
   subagent?: true;
   subagentType?: string | null;
   labels: Record<string, string>;
+  metadata?: Readonly<Record<string, unknown>> | null;
   archivedAt?: string | null;
   requiresAttention?: boolean;
   attentionReason?: string | null;
@@ -96,7 +97,7 @@ export function dismissibleIds(forest: AgentForest): string[] {
 
 function kindOf(agent: DashboardAgent): AgentKind {
   if (agent.subagent) return "subagent";
-  const job = agent.labels[LABEL];
+  const job = agentJob(agent);
   if (job === "orchestrator" || job === "planner") return job;
   return agent.labels.role ? "role" : "agent";
 }
@@ -149,7 +150,7 @@ function waitingNode(orchestrator: DashboardAgent, role: RosterTeam["roles"][num
 /** Only the newest shown orchestrator of the team's workspace gets the team's roles. */
 function leadOf(scope: readonly DashboardAgent[], team: RosterTeam): DashboardAgent | undefined {
   return scope
-    .filter((agent) => agent.labels[LABEL] === "orchestrator" && agent.workspaceId === team.orchestratorWorkspaceId && team.orchestratorWorkspaceId !== null)
+    .filter((agent) => agentJob(agent) === "orchestrator" && agent.workspaceId === team.orchestratorWorkspaceId && team.orchestratorWorkspaceId !== null)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
 }
 

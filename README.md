@@ -39,6 +39,14 @@ The **Agent teams** screen holds the global presets (a lead model, a candidate p
 
 ![Agent teams screen: header with counts, two team presets with their candidate members, and project cards whose team rows show mode, language, lead model and role counts](docs/images/teams-screen-en.png)
 
+### Start a team from Paseo's own new chat
+
+In a new agent's draft, or on the New workspace screen, the composer has a **Team** control next to the model picker: no team, this workspace's team, or any of your presets. Pick one, type the request and send: that agent becomes the team's lead and starts on your request. A preset also picks its lead model, and is written as the workspace's team file; a **Team mode** control next to it sets the mode for the session.
+
+![A new agent's draft composer with the Team list open: No team, This workspace's team, and a preset with its mode and lead model](docs/images/draft-team-en.png)
+
+Workspaces that run a team get a badge in the sidebar with their mode, or how many members are working or need you.
+
 ### What you get in Paseo
 
 - **Agent team panel** (a workspace tab): describe a goal, or leave it empty and let a planner read the project. The planner proposes roles, candidate members and a mode. You review the proposal (searchable provider and model pickers, folders, instructions, **Edit team with AI** with undo and redo) and press **Apply**. The panel then starts the lead in that workspace. Here you can also **Save as preset**, **Reapply** and **Reset session**.
@@ -54,7 +62,7 @@ The **Agent teams** screen holds the global presets (a lead model, a candidate p
 
 ### Requirements
 
-- Paseo **0.15.0** or later, with **Settings → Plugins → Enable plugins** on.
+- Paseo **0.16.0** or later, with **Settings → Plugins → Enable plugins** on.
 - **Paseo tools for agents** on: Settings → your host → **Orchestration → Enable Paseo tools** (`daemon.mcp.injectIntoAgents`, off by default). The team tools are served next to Paseo's own tools. While this setting is off, the team panel warns you, and Apply and Reset session refuse to run.
 - At least one ready provider (`paseo provider ls`).
 
@@ -137,6 +145,14 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
 
 ![智能体团队页：顶部统计，团队预设卡片和候选成员，项目卡片中的团队行显示模式、语言、协调器模型和角色数](docs/images/teams-screen-zh.png)
 
+### 在 Paseo 自带的新会话里组队
+
+新建 agent 的草稿里，以及「新建工作区」页面上，输入框的模型选择旁边多了一个**团队**控件：不使用团队、本工作区的团队，或你的任意预设。选好后写下需求发送，这个 agent 就成为团队的协调器并开始处理需求。选择预设时会同时切换到预设的协调器模型，并把预设写成该工作区的团队文件；旁边的**团队模式**控件可以为这段会话指定模式。
+
+![新建 agent 的草稿输入框，团队列表已展开：不使用团队、本工作区的团队，以及一个显示模式和协调器模型的预设](docs/images/draft-team-zh.png)
+
+运行团队的工作区在侧边栏有一个徽标，显示协作模式，或几个成员在工作、几个需要你处理。
+
 ### 在 Paseo 里能用到的
 
 - **智能体团队面板**（工作区标签页）：写一个目标，或者留空，让规划 agent 阅读项目。它会提出角色、候选成员和协作模式。你审阅提案（provider 和模型可搜索选择，可设置目录和说明，可以**用 AI 修改团队**并撤销重做），然后点**应用**，面板就在该工作区启动协调器。这里还可以**另存为预设**、**重新应用**、**重置会话**。
@@ -152,7 +168,7 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
 
 ### 要求
 
-- Paseo **0.15.0** 或更新，并打开 **设置 → 插件 → 启用插件**。
+- Paseo **0.16.0** 或更新，并打开 **设置 → 插件 → 启用插件**。
 - 打开**给 agent 提供 Paseo 工具**：设置 → 你的主机 → **Orchestration → Enable Paseo tools**（`daemon.mcp.injectIntoAgents`，默认关闭）。团队工具和 Paseo 自带工具一起提供给 agent；这个设置关闭时，团队面板会提示，「应用」和「重置会话」也会拒绝执行。
 - 主机上至少有一个可用的 provider（`paseo provider ls`）。
 

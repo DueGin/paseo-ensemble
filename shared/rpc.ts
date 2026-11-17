@@ -420,3 +420,10 @@ export const teamLegacyPresetsRpc = defineRpc({
   input: z.object({}),
   output: z.object({ presets: z.array(PresetSchema) }),
 });
+
+/** The sidebar's workspace rows: each workspace that runs a team, its mode, and its active run's members by state. */
+export const teamBadgesRpc = defineRpc({
+  name: "team.badges",
+  input: z.object({}),
+  output: z.record(z.string(), z.object({ mode: z.enum(TEAM_MODES), working: z.number(), attention: z.number() })),
+});
