@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**Ensemble** (`paseo-plugin.json`, id `paseo-ensemble`, repository `DueGin/paseo-ensemble`) is a Paseo plugin that turns a Paseo project into an agent team. It began as a fork of `gyuha/paseo-agent-team` and is now maintained on its own; the old id was `paseo-agent-team`. It works like this: each role gets its own provider/model, every role runs in the orchestrator's workspace (one workspace per team), and the orchestrator agent delegates to them. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the older single `.agents/team.json` is still read), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
+**Ensemble** (`paseo-plugin.json`, id `paseo-ensemble`, repository `DueGin/paseo-ensemble`) is a Paseo plugin that turns a Paseo project into an agent team. It works like this: each role gets its own provider/model, every role runs in the orchestrator's workspace (one workspace per team), and the orchestrator agent delegates to them. Team definitions live in the project repo, one per workspace, as `.agents/teams/<orchestrator workspace>.json` (the older single `.agents/team.json` is still read), not in plugin settings (see `.forge/adr/`). Domain terms (Project, Workspace, Role, Orchestrator, Team definition) are defined in `.forge/CONTEXT.md`; use them as written.
 
 ## Commands
 

@@ -75,7 +75,7 @@ paseo plugin ls      # paseo-ensemble should be "running"
 
 Reload the Paseo window afterwards so the app picks up the plugin's UI.
 
-**Coming from `paseo-agent-team`?** Ensemble is the same plugin under a new id. Install it, then remove the old one with `paseo plugin remove paseo-agent-team`. Your team files in `.agents/teams/` keep working. If you had presets saved under the old id, the Agent teams screen offers to import them once.
+**If `paseo-agent-team` is installed:** remove it with `paseo plugin remove paseo-agent-team` after installing Ensemble. Team files in `.agents/teams/` keep working, and presets saved by it can be imported once on the Agent teams screen.
 
 ### Team file
 
@@ -103,8 +103,6 @@ A team file can have roles, candidates or both, but not neither. Every field is 
 - [docs/guide.md](docs/guide.md): the full manual, covering creating and changing teams, team mode in detail, presets, candidates, dashboards, permissions and limitations.
 - [OVERVIEW.md](OVERVIEW.md): a short behaviour reference.
 - Development: `npm run typecheck && npm test` (unit tests). `PASEO_E2E=1 npx vitest run tests/collab.e2e.test.ts` runs both modes with real agents on a daemon (`PASEO_URL` picks it; use a throwaway daemon with its own `--home`).
-
-Ensemble began as an extended fork of [gyuha/paseo-agent-team](https://github.com/gyuha/paseo-agent-team) (MIT), which created the team panel, the planner and the agent dashboard. It is now developed on its own. Its sibling for Orca is [orca-ensemble](https://github.com/DueGin/orca-ensemble).
 
 ---
 
@@ -175,7 +173,7 @@ paseo plugin ls      # paseo-ensemble 应为 "running"
 
 安装后重新加载 Paseo 窗口，让应用加载插件界面。
 
-**从 `paseo-agent-team` 迁移？** Ensemble 就是同一个插件换了新 id。装好之后用 `paseo plugin remove paseo-agent-team` 删除旧插件即可。`.agents/teams/` 里的团队文件照常可用；旧 id 下保存过的预设，可以在智能体团队页一键导入。
+**如果装过 `paseo-agent-team`：** 装好 Ensemble 后用 `paseo plugin remove paseo-agent-team` 删除它。`.agents/teams/` 里的团队文件照常可用；它保存过的预设，可以在智能体团队页一键导入。
 
 ### 团队文件
 
@@ -186,8 +184,6 @@ paseo plugin ls      # paseo-ensemble 应为 "running"
 - [docs/guide.md](docs/guide.md)：完整使用手册（英文），包括创建和修改团队、团队模式细节、预设、候选成员、仪表盘、权限和限制。
 - [OVERVIEW.md](OVERVIEW.md)：简短的行为说明。
 - 开发：`npm run typecheck && npm test` 运行单元测试；`PASEO_E2E=1 npx vitest run tests/collab.e2e.test.ts` 用真实 agent 在 daemon 上把两种模式各跑一遍（用 `PASEO_URL` 指定 daemon；请用带独立 `--home` 的临时 daemon）。
-
-Ensemble 最初是 [gyuha/paseo-agent-team](https://github.com/gyuha/paseo-agent-team)（MIT）的扩展分支，团队面板、规划 agent 和智能体仪表盘来自原项目；现在独立开发。Orca 版本是 [orca-ensemble](https://github.com/DueGin/orca-ensemble)。
 
 ## License
 
