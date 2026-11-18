@@ -332,6 +332,16 @@ export function roundComplete(run: Run): boolean {
   return run.members.length > 0 && !run.members.some(busy);
 }
 
+/**
+ * Whether nothing can move an active run along any more: its lead is archived or gone (`null`), and its workspace is not
+ * among Paseo's workspaces. Such a run is closed instead of being swept, and failing to staff, every minute.
+ */
+export function runOrphaned(run: Pick<Run, "status" | "workspaceId">, lead: { archivedAt?: string | null } | null, workspaceIds: readonly string[]): boolean {
+  if (run.status !== "active") return false;
+  if (lead && !lead.archivedAt) return false;
+  return !workspaceIds.includes(run.workspaceId);
+}
+
 /** Every member finished the run's last round or batch and no open task is waiting for an idle member; a follow-up may still reopen it. */
 export function runFinished(run: Run): boolean {
   return roundComplete(run) && (run.mode === "delegation" || (run.round >= run.rounds && !dispatchPlan(run).length && !pendingPlans(run).length && !undeliveredVerdicts(run).length));

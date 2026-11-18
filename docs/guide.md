@@ -138,7 +138,7 @@ Team mode follows the "team" shape of multi-agent systems (lead + shared task bo
 | Quality gate | In the review round, members check each other's done tasks against the brief and send back what misses it with a reason (`team_task`, reject); the orchestrator can do the same when it checks the acceptance criteria. A sent-back task goes back to its role with the reason. |
 | File claims | `team_board_claim` for paths outside a member's tasks; overlapping claims of working members are refused. |
 | Replacing members | Moving a formed role to another candidate retires its member in the run; its open tasks go to a new member. An archived member is retired too. |
-| Closing | `team_close` ends the run, releases claims and can archive the members. A new run also closes the previous one. |
+| Closing | `team_close` ends the run, releases claims and can archive the members. A new run also closes the previous one. A run whose orchestrator is archived and whose workspace no longer exists is closed by the plugin, so it is not retried. |
 | Observability | The session dashboard shows the tree, the task board by state (with dependencies, plans waiting and sent-back tasks), the brief, the latest posts and the claims. |
 
 All members share the orchestrator's checkout; there is no per-member worktree. Runs are stored in `.agents/runs/<run>.json` (kept out of git).

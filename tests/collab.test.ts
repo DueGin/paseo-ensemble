@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addPost, boardText, briefPosition, claimPaths, confirmsBrief, createRun, finishMember, markCollected, memberOf, nextStep, normalizePath, pathsOverlap,
-  releaseClaims, roundComplete, runSummary, startBatch, startRound, upsertMember, conversationFrom, wakeMembers, boardPage, newRunId, timelineEnd, type Run,
+  releaseClaims, roundComplete, runOrphaned, runSummary, startBatch, startRound, upsertMember, conversationFrom, wakeMembers, boardPage, newRunId, timelineEnd, type Run,
 } from "../shared/collab";
 import { PLUGIN_MESSAGE_PREFIX } from "../shared/modes";
 import { allowsMode, effectiveMode } from "../shared/modes";
@@ -256,5 +256,21 @@ describe("run ids", () => {
   it("have 8 hex digits", () => {
     expect(newRunId(() => 0.5)).toBe("R80000000");
     expect(newRunId()).toMatch(/^R[0-9A-F]{8}$/);
+  });
+});
+
+describe("a run nobody can move along", () => {
+  const run = (status: "active" | "closed" = "active") => ({ status, workspaceId: "wks_gone" });
+
+  it("is an active run whose lead is archived or gone and whose workspace no longer exists", () => {
+    expect(runOrphaned(run(), { archivedAt: "2026-11-15T10:24:25.060Z" }, ["wks_other"])).toBe(true);
+    expect(runOrphaned(run(), null, [])).toBe(true);
+  });
+
+  it("is not one whose lead still runs, whose workspace still exists, or that is closed", () => {
+    expect(runOrphaned(run(), { archivedAt: null }, [])).toBe(false);
+    expect(runOrphaned(run(), {}, [])).toBe(false);
+    expect(runOrphaned(run(), { archivedAt: "2026-11-15T10:24:25.060Z" }, ["wks_gone"])).toBe(false);
+    expect(runOrphaned(run("closed"), null, [])).toBe(false);
   });
 });

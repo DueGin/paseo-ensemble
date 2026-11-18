@@ -13,7 +13,7 @@ import {
   addBatch, addPost, addTasks, assignTasks, attachPacket, batchToSummarize, summarizeBatch, boardPage, briefPosition, briefText, claimPaths, claimTask, completeTask, confirmsBrief, conversationFrom, createRun, DEFAULT_TEAM_ROUNDS,
   excerpt, finishMember, inboxOf, inboxText, leadInbox, markCollected, markInbox, markPlansNotified, MAX_NUDGES, MAX_ROUNDS, MAX_TEAM_SIZE,
   MEMBER_POST_KINDS, memberOf, memberTitle, newRunId, nextStep, normalizeRun, pathsOverlap, pendingPlans, postLine, rejectTask, releaseClaims, releaseTask,
-  retireMember, retireRole, reviewPlan, roundComplete, runFinished, runSummary, startBatch, startRound, submitPlan, taskBoardText, taskOf, taskReady, timelineEnd, TO_ALL,
+  retireMember, retireRole, reviewPlan, roundComplete, runFinished, runOrphaned, runSummary, startBatch, startRound, submitPlan, taskBoardText, taskOf, taskReady, timelineEnd, TO_ALL,
   touchMember, undeliveredVerdicts, markVerdictsDelivered, unstaffedRoles, updateMember, updateTasks, upsertMember, wakeMembers, workingMembers, mayTake,
   type BoardTask, type Brief, type NewTask, type PendingBrief, type Run, type RunMember, type TaskChange,
 } from "../shared/collab";
@@ -671,9 +671,24 @@ function finishIfCurrent(runId: string, seen: RunMember, endedAt: number, outcom
 }
 
 /** Catches up members whose lifecycle events were missed, for example while the plugin reloaded. */
+/**
+ * Closes a run whose lead is archived and whose workspace is gone: nothing can move it along, and the sweep would try to
+ * staff it every minute. Its claims are released and its record kept, as `team_close` does. A failed workspace lookup closes nothing.
+ */
+async function closeIfOrphaned(paseo: PaseoApi, run: Run): Promise<boolean> {
+  const lead = await agentStatus(paseo, run.leadAgentId);
+  if (lead && !lead.archivedAt) return false;
+  const workspaces = await paseo.workspaces.list().catch(() => null);
+  if (!workspaces || !runOrphaned(run, lead, workspaces.entries.map((entry) => entry.id))) return false;
+  await store.mutate(run.id, (current) => (current.status === "active" ? { ...current, status: "closed", claims: [], updatedAt: now() } : current));
+  console.error(`[ensemble] closed run ${run.id}: its lead is archived and its workspace is gone`);
+  return true;
+}
+
 async function reconcile(paseo: PaseoApi, runId: string): Promise<void> {
   const run = store.get(runId);
   if (!run) return;
+  if (await closeIfOrphaned(paseo, run)) return;
   for (const member of workingMembers(run)) {
     if (Date.now() - Date.parse(member.dispatchedAt) < 30_000) continue;
     const agent = await agentStatus(paseo, member.agentId);

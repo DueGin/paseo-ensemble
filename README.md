@@ -110,7 +110,7 @@ A team file can have roles, candidates or both, but not neither. Every field is 
 
 - [docs/guide.md](docs/guide.md): the full manual, covering creating and changing teams, team mode in detail, presets, candidates, dashboards, permissions and limitations.
 - [OVERVIEW.md](OVERVIEW.md): a short behaviour reference.
-- Versions: each release is a git tag `vX.Y.Z` (the version in `package.json`). Install one with `paseo plugin add git:DueGin/paseo-ensemble --ref v0.5.0`.
+- Versions: each release is a git tag `vX.Y.Z` (the version in `package.json`). Install one with `paseo plugin add git:DueGin/paseo-ensemble --ref v0.5.1`.
 - Development: `npm run typecheck && npm test` (unit tests). `PASEO_E2E=1 npx vitest run tests/collab.e2e.test.ts` runs both modes with real agents on a daemon (`PASEO_URL` picks it; use a throwaway daemon with its own `--home`).
 
 ---
@@ -200,7 +200,7 @@ paseo plugin ls      # paseo-ensemble 应为 "running"
 
 - [docs/guide.md](docs/guide.md)：完整使用手册（英文），包括创建和修改团队、团队模式细节、预设、候选成员、仪表盘、权限和限制。
 - [OVERVIEW.md](OVERVIEW.md)：简短的行为说明。
-- 版本：每个发布版本都有对应的 git tag `vX.Y.Z`（即 `package.json` 里的版本号）。安装指定版本：`paseo plugin add git:DueGin/paseo-ensemble --ref v0.5.0`。
+- 版本：每个发布版本都有对应的 git tag `vX.Y.Z`（即 `package.json` 里的版本号）。安装指定版本：`paseo plugin add git:DueGin/paseo-ensemble --ref v0.5.1`。
 - 开发：`npm run typecheck && npm test` 运行单元测试；`PASEO_E2E=1 npx vitest run tests/collab.e2e.test.ts` 用真实 agent 在 daemon 上把两种模式各跑一遍（用 `PASEO_URL` 指定 daemon；请用带独立 `--home` 的临时 daemon）。
 
 ## License
