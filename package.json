@@ -5,6 +5,7 @@
   "description": "Ensemble: agent teams for Paseo. A lead and members on their own providers and models, in team (intake + shared board) or delegation mode, with a live data-flow dashboard.",
   "files": [
     "paseo-plugin.json",
+    "assets/",
     "OVERVIEW.md",
     "index.client.tsx",
     "index.server.ts",

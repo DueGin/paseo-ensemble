@@ -1,6 +1,7 @@
 {
   "id": "paseo-ensemble",
   "name": "Ensemble",
+  "icon": "assets/icon.png",
   "description": "Agent teams for Paseo: a lead and members on their own providers and models, in team (shared board) or delegation mode, with a live data-flow dashboard",
   "translations": {
     "zh-CN": {
