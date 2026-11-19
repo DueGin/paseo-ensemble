@@ -39,6 +39,19 @@ export function agentModeOf(entries: readonly ProviderEntry[], provider: string)
   )?.id;
 }
 
+/**
+ * A member's mode: its provider's full-access one (Claude's Bypass, Codex's Full Access), so work delegated to it never
+ * stops on a permission prompt; else the mode a lead gets.
+ */
+export function memberModeOf(entries: readonly ProviderEntry[], provider: string): string | undefined {
+  const modes = entries.find((entry) => entry.provider === provider)?.modes ?? [];
+  const full =
+    modes.find((mode) => mode.isUnattended === true) ??
+    modes.find((mode) => mode.colorTier === "dangerous") ??
+    modes.find((mode) => /bypass|full[-_ ]?access|yolo|dangerous/i.test(`${mode.id} ${mode.label ?? ""}`));
+  return full?.id ?? agentModeOf(entries, provider);
+}
+
 /** Each role's agent mode, keyed by role name. */
 export function roleModes(team: Team, entries: readonly ProviderEntry[]): Record<string, string | undefined> {
   return Object.fromEntries(team.roles.map((role) => [role.name, agentModeOf(entries, role.provider)]));

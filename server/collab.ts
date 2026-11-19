@@ -27,7 +27,8 @@ import { promptsFor } from "../shared/prompts";
 import type { teamBadgesRpc, teamSessionDetailRpc, teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
 import { serializeTeam, type Team } from "../shared/team";
 import { teamIn } from "../shared/team-files";
-import { agentModeOf } from "../shared/validate";
+import { memberModeOf } from "../shared/validate";
+import { showHandoff, showUpdate } from "./cards";
 import { logEvents, traceRun, type FlowParty, type NewEvent } from "../shared/flow";
 import { allProjects, featuresFor, projectTeams, providerEntries, sleep, writeFileAtomic, type PaseoApi } from "./common";
 import { draftCreateRequest, prepareDraftLead } from "./draft";
@@ -418,24 +419,30 @@ async function reusableMember(paseo: PaseoApi, ctx: LeadContext, leadId: string,
 }
 
 /** Continues the role's idle member with the prompt, or starts one as a child of the lead, in the run's language. */
-async function dispatch(paseo: PaseoApi, ctx: LeadContext, leadId: string, spec: MemberSpec, prompt: string, lang: PromptLanguage): Promise<{ agentId: string; title: string; continued: boolean }> {
+async function dispatch(paseo: PaseoApi, ctx: LeadContext, leadId: string, spec: MemberSpec, prompt: string, lang: PromptLanguage, summary = ""): Promise<{ agentId: string; title: string; continued: boolean }> {
   const existing = await reusableMember(paseo, ctx, leadId, spec, lang);
   if (existing === "busy") throw new Error(lang === "zh" ? `${spec.name} 正忙于其他工作；请等它完成，或把工作交给别的角色。` : `${spec.name} is busy with other work; wait for it to finish, or give the work to another role.`);
+  // The lead's chat shows the handoff, as Orca shows an agent launching another.
+  const card = (agentId: string, title: string, continued: boolean) =>
+    showHandoff(paseo, leadId, { runId: store.leadRun(leadId, true)?.id ?? null, workspaceId: ctx.workspaceId, agentId, title, role: spec.name, provider: spec.provider, model: spec.model, task: excerpt(summary || prompt, 600), continued, at: now() });
   if (existing) {
     await paseo.agents.ref(existing.id).send(prompt);
     const current = (await paseo.agents.ref(existing.id).refresh().catch(() => null))?.agent as { title?: string | null } | undefined;
+    await card(existing.id, current?.title ?? spec.name, true);
     return { agentId: existing.id, title: current?.title ?? spec.name, continued: true };
   }
   const entries = await providerEntries(paseo);
   const featureValues = await featuresFor(paseo, entries, `${spec.provider}/${spec.model}`, ctx.project.root);
   const title = memberTitle(spec.name);
   const agent = await paseo.workspaces.ref(ctx.workspaceId).agents.create({
-    config: { provider: `${spec.provider}/${spec.model}`, modeId: agentModeOf(entries, spec.provider), ...(featureValues ? { featureValues } : {}), systemPrompt: promptsFor(lang).memberSystemPrompt(ctx.team, spec) },
+    // A member works for the lead unattended: its provider's full-access mode, so it never stops on a permission prompt.
+    config: { provider: `${spec.provider}/${spec.model}`, modeId: memberModeOf(entries, spec.provider), ...(featureValues ? { featureValues } : {}), systemPrompt: promptsFor(lang).memberSystemPrompt(ctx.team, spec) },
     title,
     prompt,
     labels: { role: spec.name, [LABEL]: "member", [LANGUAGE_LABEL]: lang },
     parent: leadId,
   });
+  await card(agent.id, title, false);
   return { agentId: agent.id, title, continued: false };
 }
 
@@ -517,7 +524,8 @@ async function staff(paseo: PaseoApi, runId: string): Promise<void> {
     if (staffing.has(lock)) continue;
     staffing.add(lock);
     try {
-      const started = await dispatch(paseo, ctx, run.leadAgentId, spec, promptsFor(current.language).teamKickoffPrompt(current, current.brief!, rosterOf(ctx, current, [spec]), spec, headerFor(spec, current.language)), current.language);
+      const open = current.tasks.filter((task) => task.state === "todo" && key(task.role ?? "") === key(spec.name)).map((task) => `${task.id} ${task.title}`).join("\n");
+      const started = await dispatch(paseo, ctx, run.leadAgentId, spec, promptsFor(current.language).teamKickoffPrompt(current, current.brief!, rosterOf(ctx, current, [spec]), spec, headerFor(spec, current.language)), current.language, open || current.title);
       await store.mutate(runId, (latest) => {
         // New work after the lead was told the run finished opens a new round, so the lead hears back again.
         const reopened = roundComplete(latest) && latest.notifiedRound >= latest.round ? { ...latest, round: latest.round + 1, rounds: Math.max(latest.rounds, latest.round + 1) } : latest;
@@ -661,13 +669,21 @@ async function moveAlong(paseo: PaseoApi, runId: string, depth: number): Promise
  * turn that really was shorter is caught up by reconcile.
  */
 const DISPATCH_MARGIN_MS = 1500;
-function finishIfCurrent(runId: string, seen: RunMember, endedAt: number, outcome: "completed" | "failed" | "canceled", message: string | null): Promise<Run> {
-  return store.mutate(runId, (current) => {
+/** Ends a member's current turn with its result, and shows the result in the lead's chat ("Update from worker"). */
+async function finishIfCurrent(paseo: PaseoApi, runId: string, seen: RunMember, endedAt: number, outcome: "completed" | "failed" | "canceled", message: string | null): Promise<Run> {
+  let finished = false;
+  const run = await store.mutate(runId, (current) => {
     const member = memberOf(current, seen.agentId);
     if (!member || (member.state !== "working" && member.state !== "attention") || member.dispatchedAt !== seen.dispatchedAt) return current;
     if (Date.parse(member.dispatchedAt) > endedAt - DISPATCH_MARGIN_MS) return current;
+    finished = true;
     return finishMember(current, seen.agentId, outcome, message, now());
   });
+  if (finished) {
+    const member = memberOf(run, seen.agentId);
+    await showUpdate(paseo, run.leadAgentId, { runId: run.id, workspaceId: run.workspaceId, agentId: seen.agentId, title: member?.title ?? seen.title, role: member?.role ?? seen.role, outcome, result: excerpt(message ?? "", 1200), at: now() });
+  }
+  return run;
 }
 
 /** Catches up members whose lifecycle events were missed, for example while the plugin reloaded. */
@@ -693,12 +709,12 @@ async function reconcile(paseo: PaseoApi, runId: string): Promise<void> {
     if (Date.now() - Date.parse(member.dispatchedAt) < 30_000) continue;
     const agent = await agentStatus(paseo, member.agentId);
     if (!agent || agent.archivedAt) {
-      await finishIfCurrent(runId, member, Date.now(), "failed", "(the member's agent was archived or is gone)");
+      await finishIfCurrent(paseo, runId, member, Date.now(), "failed", "(the member's agent was archived or is gone)");
     } else if (agent.pendingPermissions?.length) {
       if (member.state !== "attention") await store.mutate(runId, (current) => (memberOf(current, member.agentId)?.state === "working" ? updateMember(current, member.agentId, { state: "attention" }, now()) : current));
     } else if (agent.status !== "running" && agent.status !== "initializing") {
       const message = await lastMessage(paseo, member.agentId);
-      await finishIfCurrent(runId, member, Date.now(), agent.status === "error" ? "failed" : "completed", message);
+      await finishIfCurrent(paseo, runId, member, Date.now(), agent.status === "error" ? "failed" : "completed", message);
     } else if (member.state === "attention") {
       await store.mutate(runId, (current) => (memberOf(current, member.agentId)?.state === "attention" ? updateMember(current, member.agentId, { state: "working" }, now()) : current));
     }
@@ -713,7 +729,7 @@ async function onTurnEnded(paseo: PaseoApi, agentId: string, outcome: "completed
   const member = run ? memberOf(run, agentId) : undefined;
   if (run && member && (member.state === "working" || member.state === "attention")) {
     const message = await lastMessage(paseo, agentId);
-    await finishIfCurrent(run.id, member, endedAt, outcome, message);
+    await finishIfCurrent(paseo, run.id, member, endedAt, outcome, message);
     await advance(paseo, run.id);
   }
   // A delegation lead that collected every report of a batch ends its turn with the summary of that batch.
@@ -734,6 +750,14 @@ function startSweep(paseo: PaseoApi): void {
     for (const run of store.activeRuns()) void reconcile(paseo, run.id).catch((error) => console.error(`[ensemble] sweep of ${run.id} failed`, error));
   }, 60_000);
   sweeping.unref?.();
+}
+
+/** Whether an agent is a team member the plugin started (by its run, else its label), whatever run it is in now. */
+async function isMember(paseo: PaseoApi, agentId: string): Promise<boolean> {
+  await store.loadAll(paseo).catch(() => undefined);
+  if (store.memberRun(agentId)) return true;
+  const agent = await agentStatus(paseo, agentId);
+  return agent ? agentJob(agent) === "member" : false;
 }
 
 async function onAttention(paseo: PaseoApi, agentId: string, state: "attention" | "working"): Promise<void> {
@@ -1091,7 +1115,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
         const task = parts.length === 1 ? parts[0]! : parts.map((part, index) => `### ${tr("Part", "第")} ${index + 1}${zh ? " 部分" : ""}\n${part}`).join("\n\n");
         const header = headerFor(spec, lang);
         try {
-          const started = await dispatch(paseo, ctx, agent.id, spec, P.delegationTaskPrompt(run, header ? `${header}\n\n${task}` : task), lang);
+          const started = await dispatch(paseo, ctx, agent.id, spec, P.delegationTaskPrompt(run, header ? `${header}\n\n${task}` : task), lang, task);
           run = await store.mutate(run.id, (current) => mirrorTask(upsertMember(current, { role: spec.name, agentId: started.agentId, title: started.title, task }, now()), spec.name, started.agentId, started.title, task));
           run = await store.log(run.id, [contextEvent(started.agentId, spec, started.continued)]);
           lines.push(`- ${started.title} (${spec.name}, ${spec.provider}/${spec.model}): ${started.continued ? tr("continued", "沿用已有成员") : tr("started", "已启动")}`);
@@ -1215,7 +1239,8 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
         const roster = rosterOf(ctx, run, specs);
         for (const spec of specs) {
           try {
-            const started = await dispatch(paseo, ctx, agent.id, spec, P.teamKickoffPrompt(run, full, roster, spec, headerFor(spec, lang)), lang);
+            const mine = run.tasks.filter((entry) => key(entry.role ?? "") === key(spec.name)).map((entry) => `${entry.id} ${entry.title}`).join("\n");
+            const started = await dispatch(paseo, ctx, agent.id, spec, P.teamKickoffPrompt(run, full, roster, spec, headerFor(spec, lang)), lang, mine || full.title);
             run = await store.mutate(run.id, (current) => upsertMember(current, { role: spec.name, agentId: started.agentId, title: started.title, task: "" }, now()));
             lines.push(`- ${started.title} (${spec.name}, ${spec.provider}/${spec.model}): ${started.continued ? tr("continued", "沿用已有成员") : tr("started", "已启动")}`);
           } catch (error) {
@@ -1789,7 +1814,13 @@ export function contributeCollaboration(server: PluginServerContext, readPresets
     startSweep(paseo);
     await onTurnEnded(paseo, agent.id, outcome.kind).catch((error) => console.error(`[ensemble] after turn of ${agent.id}`, error));
   });
-  server.addHook("agent.permission.before", async ({ agent }, { paseo }) => {
+  server.addHook("agent.permission.before", async ({ agent, request }, { paseo }) => {
+    // A member works unattended for the lead: a tool call it asks about is allowed at once (its full-access mode
+    // normally asks nothing). A question to the person, or a plan to approve, still waits for them.
+    if (request.kind === "tool" && (await isMember(paseo, agent.id))) {
+      const allowed = await paseo.agents.ref(agent.id).respondToPermission({ requestId: request.id, response: { behavior: "allow" } }).then(() => true, (error) => (console.error(`[ensemble] could not allow ${request.name} for ${agent.id}`, error), false));
+      if (allowed) return;
+    }
     await onAttention(paseo, agent.id, "attention").catch((error) => console.error(`[ensemble] permission of ${agent.id}`, error));
   });
   server.addHook("agent.permission.after", async ({ agent }, { paseo }) => {
@@ -1800,7 +1831,7 @@ export function contributeCollaboration(server: PluginServerContext, readPresets
     const run = store.memberRun(agent.id);
     const member = run ? memberOf(run, agent.id) : undefined;
     if (run && member && (member.state === "working" || member.state === "attention")) {
-      await finishIfCurrent(run.id, member, Date.now(), "failed", "(the member's agent was archived)");
+      await finishIfCurrent(paseo, run.id, member, Date.now(), "failed", "(the member's agent was archived)");
       await advance(paseo, run.id).catch(() => undefined);
     } else if (run && member && !member.retired) {
       // An archived idle member gets no more work; its open tasks, even one waiting for a verdict, go back on the board.

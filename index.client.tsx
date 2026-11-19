@@ -1,5 +1,6 @@
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { AgentDashboard, SessionDashboard } from "./client/AgentDashboard";
+import { contributeCards } from "./client/Cards";
 import { contributeDraftTeam } from "./client/DraftTeam";
 import { contributeTeamBadge } from "./client/TeamBadge";
 import { messages } from "./client/i18n";
@@ -30,7 +31,10 @@ export default function contribute(client: PluginClientContext) {
   // Paseo 0.16: a badge on the sidebar's workspace rows that run a team.
   const removeTeamBadge = contributeTeamBadge(client);
   const removeSessionAccess = contributeSessionAccess(client);
+  // Delegation shown in the lead's chat: "Handed off to agent" and "Update from worker" cards.
+  const removeCards = contributeCards(client);
   return () => {
+    removeCards();
     removeDraftTeam();
     removeTeamBadge();
     removeSessionAccess();

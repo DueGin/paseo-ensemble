@@ -2,8 +2,8 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { contributeCollaboration, sessionDetail, sessionInfo, setSessionMode, workspaceBadges } from "./server/collab";
 import { legacyPresets } from "./server/legacy";
 import { presetsSettings } from "./shared/presets";
-import { applyTeam, startFromPreset, cancelProposal, deleteTeam, improveInstructions, instructionsProposal, pendingProposal, projectTeamsList, proposeTeamEdit, proposeTeam, readTeam, reconnectTeam, restartOrchestrator, restoreTeam, teamEditProposal, teamProposal, teamRoster } from "./server/team";
-import { teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc, teamSessionModeRpc, teamSessionRpc, teamSessionDetailRpc, teamPresetStartRpc, teamLegacyPresetsRpc, teamBadgesRpc } from "./shared/rpc";
+import { applyTeam, saveTeam, startFromPreset, cancelProposal, deleteTeam, improveInstructions, instructionsProposal, pendingProposal, projectTeamsList, proposeTeamEdit, proposeTeam, readTeam, reconnectTeam, restartOrchestrator, restoreTeam, teamEditProposal, teamProposal, teamRoster } from "./server/team";
+import { teamSaveRpc, teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc, teamSessionModeRpc, teamSessionRpc, teamSessionDetailRpc, teamPresetStartRpc, teamLegacyPresetsRpc, teamBadgesRpc } from "./shared/rpc";
 
 export default function contribute(server: PluginServerContext) {
   // Global team presets live in host settings, shared by every client and project of the host.
@@ -27,7 +27,13 @@ export default function contribute(server: PluginServerContext) {
   server.handle(teamEditProposalRpc, teamEditProposal);
   server.handle(teamInstructionsImproveRpc, improveInstructions);
   server.handle(teamInstructionsProposalRpc, instructionsProposal);
-  server.handle(teamApplyRpc, applyTeam);
+  // A session started from the team editor may set its own mode; the lead gets it before its first run.
+  server.handle(teamApplyRpc, async (input, ctx) => {
+    const result = await applyTeam(input, ctx);
+    if (result.ok && input.mode) await setSessionMode({ agentId: result.orchestratorAgentId, mode: input.mode }, ctx).catch((error) => console.error("[ensemble] session mode", error));
+    return result;
+  });
+  server.handle(teamSaveRpc, saveTeam);
   server.handle(teamRestoreRpc, restoreTeam);
   server.handle(teamRestartOrchestratorRpc, restartOrchestrator);
   server.handle(teamRosterRpc, teamRoster);

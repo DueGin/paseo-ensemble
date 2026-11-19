@@ -364,9 +364,18 @@ export const en = {
     cleanupFailed: "Could not clean up the planner: {{failure}}",
     permission: "A role runs in an unattended mode, so the orchestrator may now start agents with paseo run: added to {{file}}",
   },
+  cards: {
+    handoff: "Handed off to agent",
+    continued: "Given more work",
+    update: "Update from worker",
+    failed: "Failed",
+    canceled: "Stopped",
+    open: "Open the session dashboard",
+    noResult: "No result was reported.",
+  },
 } as const;
 
-type Shape<T> = { readonly [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };
+export type Shape<T> = { readonly [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };
 
 export const ko: Shape<typeof en> = {
   density: { label: "밀도", brief: "간략", normal: "보통", detailed: "자세히" },
@@ -731,6 +740,15 @@ export const ko: Shape<typeof en> = {
     openOrchestrator: "오케스트레이터 열기",
     cleanupFailed: "계획 에이전트를 정리하지 못했습니다: {{failure}}",
     permission: "무인 모드로 도는 역할이 있어서, 오케스트레이터가 paseo run으로 에이전트를 띄울 수 있게 허용했습니다: {{file}}에 추가",
+  },
+  cards: {
+    handoff: "에이전트에게 넘김",
+    continued: "추가 작업 전달",
+    update: "작업자 업데이트",
+    failed: "실패",
+    canceled: "중지됨",
+    open: "세션 대시보드 열기",
+    noResult: "보고된 결과가 없습니다.",
   },
 };
 
@@ -1098,6 +1116,15 @@ export const ja: Shape<typeof en> = {
     cleanupFailed: "プランナーをクリーンアップできませんでした: {{failure}}",
     permission: "無人モードで実行する役割があるため、オーケストレーターが paseo run でエージェントを起動できるようにしました: {{file}} に追加",
   },
+  cards: {
+    handoff: "エージェントに引き継ぎ",
+    continued: "追加の作業を依頼",
+    update: "ワーカーからの更新",
+    failed: "失敗",
+    canceled: "停止",
+    open: "セッションダッシュボードを開く",
+    noResult: "結果は報告されていません。",
+  },
 };
 
 export const zh: Shape<typeof en> = {
@@ -1463,5 +1490,14 @@ export const zh: Shape<typeof en> = {
     openOrchestrator: "打开协调器",
     cleanupFailed: "无法清理规划器：{{failure}}",
     permission: "由于有角色以无人值守模式运行，已允许协调器通过 paseo run 启动智能体：已添加到 {{file}}",
+  },
+  cards: {
+    handoff: "已移交给智能体",
+    continued: "已追加任务",
+    update: "来自工作者的更新",
+    failed: "失败",
+    canceled: "已停止",
+    open: "打开会话仪表盘",
+    noResult: "没有汇报结果。",
   },
 };

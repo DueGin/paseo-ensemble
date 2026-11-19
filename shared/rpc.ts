@@ -198,7 +198,16 @@ const AppliedWorkspaceSchema = z.object({ target: z.string(), workspace: z.strin
 /** Writes the team file, creates missing workspaces, starts the orchestrator and archives the planners. */
 export const teamApplyRpc = defineRpc({
   name: "team.apply",
-  input: TargetSchema.and(z.object({ team: z.unknown(), locale: z.string().optional() })),
+  input: TargetSchema.and(
+    z.object({
+      team: z.unknown(),
+      locale: z.string().optional(),
+      /** The user's first request for the lead; empty: the lead introduces the team and waits. */
+      request: z.string().optional(),
+      /** This session's collaboration mode, when it differs from the team's. */
+      mode: z.enum(TEAM_MODES).optional(),
+    }),
+  ),
   output: z.discriminatedUnion("ok", [
     z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
     z.object({
@@ -212,6 +221,13 @@ export const teamApplyRpc = defineRpc({
       permission: z.string().nullable(),
     }),
   ]),
+});
+
+/** Writes a team's file without starting anything: the team editor's Save. */
+export const teamSaveRpc = defineRpc({
+  name: "team.save",
+  input: TargetSchema.and(z.object({ team: z.unknown() })),
+  output: z.discriminatedUnion("ok", [z.object({ ok: z.literal(false), errors: z.array(z.string()) }), z.object({ ok: z.literal(true), file: z.string() })]),
 });
 
 /** Applies a saved team, matching or creating its orchestrator workspace. */

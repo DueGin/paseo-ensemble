@@ -10,7 +10,7 @@ import { LANGUAGE_LABEL, languageFromLocale } from "../shared/modes";
 import { promptsFor } from "../shared/prompts";
 import { extractInstructions, extractProposal, INSTRUCTIONS_JSON_SCHEMA, instructionsPrompt, plannerPrompt, teamEditPrompt, TEAM_JSON_SCHEMA } from "../shared/proposal";
 import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/projects";
-import type { teamPresetStartRpc, teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc } from "../shared/rpc";
+import type { teamSaveRpc, teamPresetStartRpc, teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc } from "../shared/rpc";
 import { checkTeam, serializeTeam, type Team } from "../shared/team";
 import { sameTeamFiles, teamFileFor, teamFileWorkspaces, teamIn, workspaceOwnerOf, workspaceClashes, workspacesOfOtherTeams } from "../shared/team-files";
 import { catalogFrom, agentModeOf, type AgentFeatures, validateTeam, type ProviderEntry } from "../shared/validate";
@@ -329,6 +329,21 @@ export async function restartOrchestrator(target: RpcInput<typeof teamRestartOrc
   return { ok: true, orchestratorAgentId: orchestrator.id, archived };
 }
 
+/** Writes a team's file, as Apply does, without starting the lead: a team edited ahead of its first session. */
+export async function saveTeam({ team: input, ...target }: RpcInput<typeof teamSaveRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamSaveRpc>> {
+  const checked = checkTeam(input);
+  if (!checked.ok) return { ok: false, errors: checked.errors };
+  const team = checked.team;
+  const project = await projectOf(paseo, target);
+  const { teams, names } = await projectTeams(project);
+  const clashes = workspaceClashes(team, workspacesOfOtherTeams(teams, team.orchestrator.workspace));
+  if (clashes.length) return { ok: false, errors: clashes.map((problem) => `${problem.target}: ${problem.message}`) };
+  const relative = teamFileFor(team, teams, names);
+  const file = join(project.root, relative);
+  await writeFileAtomic(file, serializeTeam(team));
+  return { ok: true, file };
+}
+
 /** Restores a saved team through the same validation and workspace setup as Apply. */
 export async function restoreTeam({ projectId, file, locale }: RpcInput<typeof teamRestoreRpc>, ctx: PluginHandlerContext): Promise<RpcOutput<typeof teamRestoreRpc>> {
   const project = await projectOf(ctx.paseo, { projectId });
@@ -338,7 +353,8 @@ export async function restoreTeam({ projectId, file, locale }: RpcInput<typeof t
   return applyTeam({ projectId, team: saved.team, locale }, ctx);
 }
 
-export async function applyTeam({ team: input, locale, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext, options: { request?: string } = {}): Promise<RpcOutput<typeof teamApplyRpc>> {
+export async function applyTeam({ team: input, locale, request, mode: _mode, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext, options: { request?: string } = {}): Promise<RpcOutput<typeof teamApplyRpc>> {
+  options = { ...options, request: options.request ?? request };
   const checked = checkTeam(input);
   if (!checked.ok) return { ok: false, errors: checked.errors };
   // The agents' language: the team's own, else the app language it is applied from.
