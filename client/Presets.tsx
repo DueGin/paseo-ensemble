@@ -1,23 +1,33 @@
-// Global team presets on the Agent teams screen: list, create, edit and delete them, and start a new task in a project
-// from one. Presets are host settings, so every client and project of the host sees the same list.
-import type { RpcOutput } from "@getpaseo/plugin";
+// Global team presets on the Agent teams screen: list, create, edit, rename, copy into a project and delete them, and start
+// a new task in a project from one. Presets are host settings, so every client and project of the host sees the same list.
+import type { PluginTheme, RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useSettings, useTranslation } from "@getpaseo/plugin/client";
-import { Modal } from "@getpaseo/plugin/client/ui";
+import { Modal, useToast } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
-import { withAlpha } from "../shared/color";
+import { View } from "react-native";
 import { newCandidate } from "../shared/draft";
-import { languageFromLocale, type TeamMode } from "../shared/modes";
+import { languageFromLocale, PROMPT_LANGUAGES, TEAM_MODES, type TeamMode } from "../shared/modes";
 import { namedCandidates, newPresetId, presetProblems, presetsSettings, presetToTeam, taskWorkspaceTitle, type Preset } from "../shared/presets";
-import { teamLegacyPresetsRpc, teamPresetStartRpc, type teamProjectsRpc } from "../shared/rpc";
+import { teamLegacyPresetsRpc, teamPresetStartRpc } from "../shared/rpc";
 import { catalogFrom, validateTeam, type ProviderEntry, type ProviderInfo } from "../shared/validate";
 import { messages } from "./i18n";
-import { Button, CandidateEditor, LanguagePicker, ModelPicker, ModePicker, SelectHost, TeamModel, type Styles } from "./TeamPanel";
+import { Badge, Button, Callout, Card, Chip, Empty, Field, Input, makeKit, MODE_LOOK, PART, SectionHeader, Segmented, Spinner, T, Tile, type Kit } from "./kit";
+import { copyWorkspace, relativeTo, runtimeText, type ProjectTeams as Project } from "./side/data";
+import { CandidateEditor, ModelSelect, type ProviderIcons } from "./side/model-select";
+import { LANGUAGE_NAMES, PresetCard, useCopyPreset, usePresetLibrary } from "./side/preset-card";
 
 type Colors = PluginScreenProps["theme"]["colors"];
-type Project = RpcOutput<typeof teamProjectsRpc>[number];
+type PresetStartRpc = typeof teamPresetStartRpc;
+type PresetStarted = Extract<RpcOutput<PresetStartRpc>, { ok: true }>;
+type Draft = { draft: Preset; revision: string; isNew: boolean };
+type Copying = { presetId: string; projectId: string };
+
+/** The kit for surfaces that are handed the theme's colors. */
+function useColorsKit(colors: Colors, compact: boolean): Kit {
+  return useMemo(() => makeKit({ colors } as PluginTheme, compact), [colors, compact]);
+}
 
 /** The host's providers and models, for editing presets outside any project. */
 export function useCatalog(): { catalog: ProviderInfo[]; icons: Map<string, string | undefined> } {
@@ -31,14 +41,6 @@ export function useCatalog(): { catalog: ProviderInfo[]; icons: Map<string, stri
 
 export function usePresets() {
   return useSettings(presetsSettings);
-}
-
-function Chip({ label, selected, colors, onPress }: { label: string; selected: boolean; colors: Colors; onPress(): void }) {
-  return (
-    <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={onPress} style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: selected ? colors.accent : colors.border, backgroundColor: selected ? colors.accent : colors.surface0 }}>
-      <Text style={{ color: selected ? colors.accentForeground : colors.foreground, fontSize: 12, fontWeight: selected ? "700" : "500" }}>{label}</Text>
-    </Pressable>
-  );
 }
 
 function blankPreset(catalog: readonly ProviderInfo[], locale: string): Preset {
@@ -56,146 +58,199 @@ function blankPreset(catalog: readonly ProviderInfo[], locale: string): Preset {
 }
 
 /** Edits one preset draft; the caller saves it. */
-function PresetEditor({ s, colors, catalog, draft, onChange, onSave, onCancel, saving, error }: { s: Styles; colors: Colors; catalog: readonly ProviderInfo[]; draft: Preset; onChange(next: Preset): void; onSave(): void; onCancel(): void; saving: boolean; error: string | null }) {
-  const { t } = useTranslation(messages);
+function PresetEditor({ k, catalog, icons, draft, isNew, onChange, onSave, onCancel, saving, error }: { k: Kit; catalog: readonly ProviderInfo[]; icons: ProviderIcons; draft: Preset; isNew: boolean; onChange(next: Preset): void; onSave(): void; onCancel(): void; saving: boolean; error: string | null }) {
+  const { t, locale } = useTranslation(messages);
   const problems = presetProblems(draft);
   const hostProblems = problems.length ? [] : validateTeam(presetToTeam({ ...draft, candidates: namedCandidates(draft.candidates) }, "check"), catalog);
   return (
-    <SelectHost s={s}>
-      <View style={[s.card, { gap: 10 }]}>
-        <TextInput style={s.input} value={draft.name} placeholder={t("presets.name")} onChangeText={(name) => onChange({ ...draft, name })} />
-        <TextInput style={s.input} value={draft.description} placeholder={t("presets.description")} multiline onChangeText={(description) => onChange({ ...draft, description })} />
-        <ModePicker s={s} colors={colors} mode={draft.mode} onChange={(mode) => onChange({ ...draft, mode })} />
-        <LanguagePicker s={s} colors={colors} language={draft.language} onChange={(language) => onChange({ ...draft, language })} />
-        <View style={s.orchestratorCard}>
-          <Text style={s.orchestratorLabel}>{t("presets.orchestrator")}</Text>
-          <ModelPicker s={s} catalog={catalog} provider={draft.orchestrator.provider} model={draft.orchestrator.model} onChange={(next) => onChange({ ...draft, orchestrator: next })} />
-        </View>
-        <View style={{ gap: 2 }}>
-          <Text style={s.title}>{t("candidates.title")}</Text>
-          <Text style={s.muted}>{t("candidates.hint")}</Text>
-        </View>
-        {draft.candidates.map((candidate, index) => (
-          <CandidateEditor
-            key={index}
-            s={s}
-            candidate={candidate}
-            catalog={catalog}
-            onChange={(next) => onChange({ ...draft, candidates: draft.candidates.map((entry, at) => (at === index ? next : entry)) })}
-            onRemove={() => onChange({ ...draft, candidates: draft.candidates.filter((_, at) => at !== index) })}
-          />
-        ))}
-        <View style={s.row}>
-          <Button s={s} secondary label={t("candidates.add")} onPress={() => onChange({ ...draft, candidates: [...draft.candidates, newCandidate(catalog, draft.candidates.map((entry) => entry.name))] })} />
-        </View>
-        {problems.map((problem) => <Text key={problem} style={s.danger}>{t(`presets.problems.${problem as "name"}`)}</Text>)}
-        {hostProblems.map((problem) => <Text key={problem.target + problem.message} style={s.danger}>{problem.target}: {problem.message}</Text>)}
-        {error ? <Text style={s.danger}>{t("presets.saveFailed", { error })}</Text> : null}
-        <View style={s.row}>
-          <Button s={s} label={t("presets.save")} disabled={problems.length > 0 || saving} onPress={onSave} />
-          <Button s={s} secondary label={t("review.cancel")} disabled={saving} onPress={onCancel} />
-          {saving ? <ActivityIndicator color={colors.accent} /> : null}
-        </View>
+    <Card k={k} selected style={{ gap: 14, padding: k.compact ? 12 : 16 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Tile k={k} icon={isNew ? "Plus" : "Pencil"} tone={PART.plans} size={28} />
+        <T k={k} v="h2" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
+          {isNew ? t("presets.new") : draft.name.trim() || t("presets.edit")}
+        </T>
       </View>
-    </SelectHost>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        <Field k={k} label={t("presets.name")} style={{ flexGrow: 1, flexBasis: 240 }}>
+          <Input k={k} value={draft.name} placeholder={t("presets.name")} invalid={!draft.name.trim()} onChangeText={(name) => onChange({ ...draft, name })} />
+        </Field>
+        <Field k={k} label={t("presets.orchestrator")} style={{ flexGrow: 1, flexBasis: 240 }}>
+          <ModelSelect k={k} catalog={catalog} icons={icons} provider={draft.orchestrator.provider} model={draft.orchestrator.model} title={t("presets.orchestrator")} onChange={(orchestrator) => onChange({ ...draft, orchestrator })} />
+        </Field>
+      </View>
+      <Field k={k} label={t("presets.description")}>
+        <Input k={k} value={draft.description} placeholder={t("presets.description")} multiline minHeight={52} onChangeText={(description) => onChange({ ...draft, description })} />
+      </Field>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+        <Field k={k} label={t("mode.label")} hint={t(`mode.${draft.mode}Hint`)} style={{ flexGrow: 2, flexBasis: 300 }}>
+          <Segmented<TeamMode> k={k} stretch value={draft.mode} onChange={(mode) => onChange({ ...draft, mode })} options={TEAM_MODES.map((mode) => ({ value: mode, label: t(`mode.${mode}`), icon: MODE_LOOK[mode].icon }))} />
+        </Field>
+        <Field k={k} label={t("review.language")} hint={t("review.languageHint")} style={{ flexGrow: 1, flexBasis: 200 }}>
+          <Segmented k={k} stretch value={draft.language ?? languageFromLocale(locale)} onChange={(language) => onChange({ ...draft, language })} options={PROMPT_LANGUAGES.map((language) => ({ value: language, label: LANGUAGE_NAMES[language] }))} />
+        </Field>
+      </View>
+      <View style={{ gap: 10 }}>
+        <SectionHeader k={k} icon="Users" tone={PART.board} title={t("candidates.title")} subtitle={t("candidates.hint")} count={draft.candidates.length} />
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+          {draft.candidates.map((candidate, index) => (
+            <View key={index} style={{ flexGrow: 1, flexBasis: 260, minWidth: 0 }}>
+              <CandidateEditor
+                k={k}
+                candidate={candidate}
+                catalog={catalog}
+                icons={icons}
+                onChange={(next) => onChange({ ...draft, candidates: draft.candidates.map((entry, at) => (at === index ? next : entry)) })}
+                onRemove={() => onChange({ ...draft, candidates: draft.candidates.filter((_, at) => at !== index) })}
+              />
+            </View>
+          ))}
+        </View>
+        <Button k={k} icon="Plus" label={t("candidates.add")} size="sm" onPress={() => onChange({ ...draft, candidates: [...draft.candidates, newCandidate(catalog, draft.candidates.map((entry) => entry.name))] })} />
+      </View>
+      {problems.length || hostProblems.length ? (
+        <Callout k={k} tone={problems.length ? k.c.warn : k.c.bad} icon="TriangleAlert">
+          {problems.map((problem) => (
+            <T key={problem} k={k} v="small">
+              {t(`presets.problems.${problem as "name"}`)}
+            </T>
+          ))}
+          {hostProblems.map((problem) => (
+            <T key={problem.target + problem.message} k={k} v="small">
+              {problem.target}: {problem.message}
+            </T>
+          ))}
+        </Callout>
+      ) : null}
+      {error ? (
+        <T k={k} v="small" style={{ color: k.c.bad }}>
+          {t("presets.saveFailed", { error })}
+        </T>
+      ) : null}
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        <Button k={k} variant="primary" icon="Check" label={t("presets.save")} busy={saving} disabled={problems.length > 0} onPress={onSave} />
+        <Button k={k} variant="ghost" label={t("review.cancel")} disabled={saving} onPress={onCancel} />
+      </View>
+    </Card>
   );
 }
 
-/** A collaboration mode's color, as on the Agent teams screen and the session dashboard. */
-const PRESET_MODE_TONE = { auto: "#a78bfa", team: "#34d399", delegation: "#818cf8", none: "#9ca3af" } as const;
-
-/** The global preset library: list, create, edit, delete. */
-export function PresetsSection({ s, colors }: { s: Styles; colors: Colors }) {
+/** The global preset library: list, create, edit, rename, copy into a project, delete; and the one-time legacy import. */
+export function PresetsSection({ colors, compact = false, projects = [] }: { /** Unused; kept for older callers. */ s?: unknown; colors: Colors; compact?: boolean; projects?: readonly Project[] }) {
+  const k = useColorsKit(colors, compact);
   const { t, locale } = useTranslation(messages);
-  const settings = usePresets();
+  const toast = useToast();
+  const library = usePresetLibrary();
+  const settings = library.settings;
   const { catalog, icons } = useCatalog();
   // The draft keeps the revision it was opened on, so a save never overwrites a newer change from another client.
-  const [editing, setEditing] = useState<{ draft: Preset; revision: string; isNew: boolean } | null>(null);
-  const [confirming, setConfirming] = useState<string | null>(null);
+  const [editing, setEditing] = useState(null as Draft | null);
   const readLegacy = useRpc(teamLegacyPresetsRpc);
   const legacy = useQuery({ queryKey: ["workspace-agents", "legacy-presets"], queryFn: () => readLegacy({}), staleTime: Infinity });
-  if (settings.status === "loading") return <Text style={s.muted}>{t("loading")}</Text>;
-  if (settings.status !== "ready") return <Text style={s.danger}>{t("presets.loadFailed", { error: settings.error })}</Text>;
-  const presets = settings.values.presets;
+  const [copying, setCopying] = useState(null as Copying | null);
+  const copied = useCopyPreset((file) => {
+    const project = projects.find((entry) => entry.id === copying?.projectId);
+    toast.show(t("sideUi.presets.copied", { file: project ? relativeTo(project.root, file) : file }), { variant: "success" });
+  });
+  const copyError = copied.error ? String(copied.error) : copied.data && !copied.data.ok ? copied.data.errors.join("; ") : null;
+
+  if (settings.status === "loading") {
+    return (
+      <Card k={k}>
+        <Spinner k={k} />
+      </Card>
+    );
+  }
+  if (settings.status !== "ready") {
+    return (
+      <Callout k={k} tone={k.c.bad} icon="TriangleAlert">
+        <T k={k} v="small">{t("presets.loadFailed", { error: settings.error })}</T>
+      </Callout>
+    );
+  }
+  const presets = library.presets;
   const save = async () => {
     if (!editing) return;
     const preset = { ...editing.draft, name: editing.draft.name.trim(), candidates: namedCandidates(editing.draft.candidates), updatedAt: new Date().toISOString() };
     const next = editing.isNew ? [...presets, preset] : presets.map((entry) => (entry.id === preset.id ? preset : entry));
     if (await settings.save({ presets: next }, editing.revision)) setEditing(null);
   };
+  const copyInto = (preset: Preset, projectId: string) => {
+    const project = projects.find((entry) => entry.id === projectId);
+    if (!project) return;
+    // A team of its own, for a workspace named after the preset that no workspace or team of the project uses yet.
+    const workspace = copyWorkspace(preset.name, [...project.workspaces.map((entry) => entry.title), ...project.teams.map((team) => team.orchestratorWorkspace)], null);
+    setCopying({ presetId: preset.id, projectId });
+    copied.mutate({ preset, target: { projectId }, workspace });
+  };
   return (
-    <View style={[s.card, { gap: 10 }]}>
-      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-          <Text style={[s.text, { fontSize: 17, fontWeight: "700" }]}>{t("presets.title")}</Text>
-          <Text style={s.muted}>{t("presets.hint")}</Text>
-        </View>
-        {!editing ? <Button s={s} label={`+ ${t("presets.new")}`} onPress={() => setEditing({ draft: blankPreset(catalog, locale), revision: settings.revision, isNew: true })} /> : null}
-      </View>
+    <Card k={k} style={{ gap: 14, padding: compact ? 12 : 16 }}>
+      <SectionHeader
+        k={k}
+        icon="Layers"
+        tone={PART.plans}
+        title={t("presets.title")}
+        subtitle={t("presets.hint")}
+        count={presets.length}
+        right={!editing ? <Button k={k} variant="primary" icon="Plus" label={compact ? undefined : t("presets.new")} accessibilityLabel={t("presets.new")} onPress={() => setEditing({ draft: blankPreset(catalog, locale), revision: settings.revision, isNew: true })} /> : null}
+      />
       {editing ? (
-        <PresetEditor s={s} colors={colors} catalog={catalog} draft={editing.draft} onChange={(draft) => setEditing({ ...editing, draft })} onSave={() => void save()} onCancel={() => setEditing(null)} saving={settings.saving} error={settings.saveError} />
+        <PresetEditor k={k} catalog={catalog} icons={icons} draft={editing.draft} isNew={editing.isNew} onChange={(draft) => setEditing({ ...editing, draft })} onSave={() => void save()} onCancel={() => setEditing(null)} saving={settings.saving} error={settings.saveError} />
       ) : null}
       {!presets.length && !editing && legacy.data?.presets.length ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 10, borderRadius: 8, borderWidth: 1, borderStyle: "dashed", borderColor: colors.accent }}>
-          <Text style={[s.text, { flex: 1, minWidth: 200, fontSize: 12 }]}>{t("presets.importLegacy", { count: legacy.data.presets.length })}</Text>
-          <Button s={s} label={t("presets.importButton")} disabled={settings.saving} onPress={() => void settings.save({ presets: legacy.data!.presets }, settings.revision)} />
-        </View>
+        <Callout k={k} icon="Import">
+          <View style={{ gap: 8 }}>
+            <T k={k} v="small">{t("presets.importLegacy", { count: legacy.data.presets.length })}</T>
+            <Button k={k} variant="primary" size="sm" label={t("presets.importButton")} busy={settings.saving} onPress={() => void settings.save({ presets: legacy.data!.presets }, settings.revision)} />
+          </View>
+        </Callout>
       ) : null}
-      {!presets.length && !editing ? <Text style={s.muted}>{t("presets.none")}</Text> : null}
+      {!presets.length && !editing ? (
+        <Empty k={k} icon="Layers">
+          {t("presets.none")}
+        </Empty>
+      ) : null}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
         {presets.map((preset) => (
-          <View key={preset.id} style={[s.card, { minWidth: 240, flexBasis: 300, flexGrow: 1, backgroundColor: colors.surface2, gap: 6 }]}>
-            <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-              <Text style={[s.text, { flex: 1, minWidth: 0, fontWeight: "700", fontSize: 14 }]}>{preset.name}</Text>
-              <Text style={{ color: colors.foreground, fontSize: 11, fontWeight: "600", paddingHorizontal: 7, paddingVertical: 1, borderRadius: 999, borderWidth: 1, borderColor: withAlpha(PRESET_MODE_TONE[preset.mode], 0.5), backgroundColor: withAlpha(PRESET_MODE_TONE[preset.mode], 0.14) }}>{t(`mode.${preset.mode}`)}</Text>
-              <Text style={s.muted}>{(preset.language ?? languageFromLocale(locale)) === "zh" ? "中文" : "English"}</Text>
-            </View>
-            {preset.description ? <Text style={s.muted} numberOfLines={2}>{preset.description}</Text> : null}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text style={s.muted}>{t("presets.orchestrator")}</Text>
-              <TeamModel provider={preset.orchestrator.provider} model={preset.orchestrator.model} colors={colors} icons={icons} />
-            </View>
-            <View style={{ gap: 6 }}>
-              {preset.candidates.map((candidate) => (
-                <View key={candidate.name} style={{ gap: 2, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderStyle: "dashed", borderColor: colors.border }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={[s.text, { fontSize: 12, fontWeight: "600" }]}>{candidate.name}</Text>
-                    <TeamModel provider={candidate.provider} model={candidate.model} colors={colors} icons={icons} />
-                  </View>
-                  {candidate.notes.trim() ? <Text style={[s.muted, { fontSize: 11 }]} numberOfLines={3}>{candidate.notes.trim()}</Text> : null}
-                </View>
-              ))}
-            </View>
-            {confirming === preset.id ? (
-              <View style={{ gap: 6 }}>
-                <Text style={s.text}>{t("presets.deleteConfirm", { name: preset.name })}</Text>
-                <View style={s.row}>
-                  <Button s={s} label={t("presets.deleteYes")} disabled={settings.saving} onPress={() => void settings.save({ presets: presets.filter((entry) => entry.id !== preset.id) }, settings.revision).then((saved) => { if (saved) setConfirming(null); })} />
-                  <Button s={s} secondary label={t("review.cancel")} onPress={() => setConfirming(null)} />
-                </View>
-              </View>
-            ) : (
-              <View style={s.row}>
-                <Button s={s} secondary label={t("presets.edit")} disabled={editing !== null} onPress={() => setEditing({ draft: preset, revision: settings.revision, isNew: false })} />
-                <Button s={s} secondary label={t("presets.delete")} disabled={editing !== null} onPress={() => setConfirming(preset.id)} />
-              </View>
-            )}
+          <View key={preset.id} style={{ flexGrow: 1, flexBasis: 300, minWidth: compact ? 0 : 260 }}>
+            <PresetCard
+              k={k}
+              preset={preset}
+              icons={icons}
+              detailed
+              disabled={editing !== null}
+              saving={settings.saving}
+              saveError={settings.saveError}
+              onEdit={() => setEditing({ draft: preset, revision: settings.revision, isNew: false })}
+              onRename={(name) => library.rename(preset.id, name)}
+              onDelete={() => library.remove(preset.id)}
+              copy={{
+                targets: projects.map((project) => ({ id: project.id, label: project.name })),
+                busy: copied.isPending && copying?.presetId === preset.id,
+                error: copying?.presetId === preset.id ? copyError : null,
+                run: (projectId) => projectId && copyInto(preset, projectId),
+              }}
+            />
           </View>
         ))}
       </View>
-      {settings.saveError && !editing ? <Text style={s.danger}>{t("presets.saveFailed", { error: settings.saveError })}</Text> : null}
-    </View>
+      {settings.saveError && !editing ? (
+        <T k={k} v="small" style={{ color: k.c.bad }}>
+          {t("presets.saveFailed", { error: settings.saveError })}
+        </T>
+      ) : null}
+    </Card>
   );
 }
 
 /** Starts a new task in a project from a preset: pick it, describe the work, pick or name the workspace. */
-export function StartFromPresetDialog({ s, colors, project, presets, onClose, onStarted }: { s: Styles; colors: Colors; project: Project | null; presets: readonly Preset[]; onClose(): void; onStarted(result: Extract<RpcOutput<typeof teamPresetStartRpc>, { ok: true }>): void }) {
+export function StartFromPresetDialog({ colors, compact = false, project, presets, onClose, onStarted }: { /** Unused; kept for older callers. */ s?: unknown; colors: Colors; compact?: boolean; project: Project | null; presets: readonly Preset[]; onClose(): void; onStarted(result: PresetStarted): void }) {
+  const k = useColorsKit(colors, compact);
   const { t, locale } = useTranslation(messages);
   const start = useRpc(teamPresetStartRpc);
-  const [presetId, setPresetId] = useState<string | null>(null);
-  const [mode, setMode] = useState<TeamMode>("auto");
+  const [presetId, setPresetId] = useState(null as string | null);
+  const [mode, setMode] = useState("auto" as TeamMode);
   const [request, setRequest] = useState("");
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [workspaceId, setWorkspaceId] = useState(null as string | null);
   const [title, setTitle] = useState("");
   const preset = presets.find((entry) => entry.id === presetId) ?? null;
   useEffect(() => {
@@ -215,32 +270,64 @@ export function StartFromPresetDialog({ s, colors, project, presets, onClose, on
   });
   const occupied = new Set((project?.teams ?? []).map((team) => team.workspaceId).filter((id): id is string => id !== null));
   const free = (project?.workspaces ?? []).filter((workspace) => !occupied.has(workspace.id));
+  const errors = started.error ? [String(started.error)] : started.data && !started.data.ok ? started.data.errors : [];
   return (
     <Modal title={project ? t("presets.startTitle", { project: project.name }) : ""} open={project !== null} onOpenChange={(open) => { if (!open && !started.isPending) onClose(); }}>
       <Modal.Content>
         {project ? (
-          <View style={{ gap: 10 }}>
-            <Text style={s.muted}>{t("presets.pick")}</Text>
-            <View style={s.row}>
-              {presets.map((entry) => <Chip key={entry.id} label={entry.name} selected={entry.id === presetId} colors={colors} onPress={() => { setPresetId(entry.id); setMode(entry.mode); }} />)}
-            </View>
-            {preset ? <Text style={s.muted}>{preset.candidates.map((candidate) => `${candidate.name} (${candidate.model})`).join(" · ")}</Text> : null}
-            <ModePicker s={s} colors={colors} mode={mode} onChange={setMode} />
-            <TextInput style={[s.input, { minHeight: 90, textAlignVertical: "top" }]} value={request} placeholder={t("presets.request")} multiline onChangeText={setRequest} />
-            <Text style={s.muted}>{t("presets.workspace")}</Text>
-            <View style={s.row}>
-              <Chip label={t("presets.newWorkspace")} selected={workspaceId === null} colors={colors} onPress={() => setWorkspaceId(null)} />
-              {free.map((workspace) => <Chip key={workspace.id} label={workspace.title} selected={workspaceId === workspace.id} colors={colors} onPress={() => setWorkspaceId(workspace.id)} />)}
-            </View>
-            {workspaceId === null ? (
-              <TextInput style={s.input} value={title} placeholder={`${t("presets.workspaceName")}: ${taskWorkspaceTitle(request, preset?.name ?? "task")}`} onChangeText={setTitle} />
+          <View style={{ gap: 14 }}>
+            <Field k={k} label={t("presets.pick")}>
+              <View style={{ gap: 6 }}>
+                {presets.map((entry) => {
+                  const look = MODE_LOOK[entry.mode];
+                  return (
+                    <Card key={entry.id} k={k} selected={entry.id === presetId} label={entry.name} onPress={() => { setPresetId(entry.id); setMode(entry.mode); }} style={{ gap: 3, paddingVertical: 9 }}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                        <Tile k={k} icon="Layers" tone={look.tone} size={22} />
+                        <T k={k} v="strong" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
+                          {entry.name}
+                        </T>
+                        <Badge k={k} label={t(`mode.${entry.mode}`)} tone={look.tone} />
+                      </View>
+                      <T k={k} v="tiny" numberOfLines={1}>
+                        {t("screen.lead")} {runtimeText(entry.orchestrator.provider, entry.orchestrator.model)} · {entry.candidates.map((candidate) => candidate.name).join(", ")}
+                      </T>
+                    </Card>
+                  );
+                })}
+              </View>
+            </Field>
+            <Field k={k} label={t("mode.label")} hint={t(`mode.${mode}Hint`)}>
+              <Segmented<TeamMode> k={k} stretch value={mode} onChange={setMode} options={TEAM_MODES.map((entry) => ({ value: entry, label: t(`mode.${entry}`) }))} />
+            </Field>
+            <Field k={k} label={t("sideUi.start.request")} hint={t("sideUi.start.requestHint")}>
+              <Input k={k} value={request} placeholder={t("presets.request")} multiline minHeight={90} onChangeText={setRequest} />
+            </Field>
+            <Field k={k} label={t("presets.workspace")}>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                <Chip k={k} icon="Plus" label={t("presets.newWorkspace")} on={workspaceId === null} onPress={() => setWorkspaceId(null)} />
+                {free.map((workspace) => (
+                  <Chip key={workspace.id} k={k} icon="Folder" label={workspace.title} on={workspaceId === workspace.id} onPress={() => setWorkspaceId(workspace.id)} />
+                ))}
+              </View>
+              {workspaceId === null ? (
+                <View style={{ paddingTop: 4 }}>
+                  <Input k={k} value={title} placeholder={`${t("presets.workspaceName")}: ${taskWorkspaceTitle(request, preset?.name ?? "task")}`} onChangeText={setTitle} />
+                </View>
+              ) : null}
+            </Field>
+            {errors.length ? (
+              <Callout k={k} tone={k.c.bad} icon="TriangleAlert">
+                {errors.map((error) => (
+                  <T key={error} k={k} v="small">
+                    {error}
+                  </T>
+                ))}
+              </Callout>
             ) : null}
-            {started.data && !started.data.ok ? started.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
-            {started.error ? <Text style={s.danger}>{String(started.error)}</Text> : null}
-            <View style={s.row}>
-              <Button s={s} label={t("presets.startButton")} disabled={!preset || started.isPending} onPress={() => started.mutate()} />
-              <Button s={s} secondary label={t("review.cancel")} disabled={started.isPending} onPress={onClose} />
-              {started.isPending ? <><ActivityIndicator color={colors.accent} /><Text style={s.muted}>{t("presets.starting")}</Text></> : null}
+            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+              <Button k={k} variant="primary" icon="Play" label={started.isPending ? t("presets.starting") : t("presets.startButton")} busy={started.isPending} disabled={!preset} onPress={() => started.mutate()} />
+              <Button k={k} variant="ghost" label={t("review.cancel")} disabled={started.isPending} onPress={onClose} />
             </View>
           </View>
         ) : null}

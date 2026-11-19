@@ -2,7 +2,7 @@
 
 **[English](#english)** · **[中文](#中文)**
 
-![Session dashboard in Paseo's right sidebar: tabs for Overview, Agents, Brief, Task board, Plan approval, Team board, File claims and Data flow; the run header with mode, state, round and four numbers; the data-flow diagram from the lead and members to the parts of team mode](docs/images/session-overview-en.png)
+![Ensemble in Paseo: the team editor in the center, with its sections (Overview, Collaboration, Lead, Fixed roles, Candidates), the Save, Valid, Save as preset and Start a session buttons, and the saved team with its map; on the right, the Agent team sidebar with the workspace's lead, the mode switch, the members and the run's data flow](docs/images/hero-en.png)
 
 ---
 
@@ -23,21 +23,25 @@ Everything the team does is recorded as a **data flow**: who wrote into which pa
 
 ### Screenshots
 
-The **task board** is a Kanban when the panel is wide, and stacked sections when it is narrow:
+The **team editor** is a page of sections with a live check. Its header shows **Valid** or the number of problems; press it to list them, and press a problem to go to its field. **Save** writes the team file, and **Start a session** writes it and starts the lead.
 
-![Task board tab: To do, In progress and Done columns; each card shows the task id, role, title, plan badge, owner and when it last changed](docs/images/task-board-en.png)
+![Team editor, Collaboration section: the four modes as cards (Auto, Team, Delegation chosen, None) with their pattern and what they mean, the agent language switch, and the lead's provider and model](docs/images/team-editor-en.png)
 
-The **team board** reads like a chat. Posts are grouped by round, the lead's posts are on the right, and each reader's read progress is shown on top:
+The **Agent team sidebar** sits next to Files and Changes. **Session** shows the workspace's lead, a mode switch, the members and the run's data flow. **Start** starts a lead from this workspace's team or from a preset, and **Teams** lists the project's teams and the presets. The **session dashboard** shows one run in full:
 
-![Team board tab: read progress per reader, filters by post kind, and posts as chat bubbles with author, kind, recipient and time](docs/images/team-board-en.png)
+<p>
+<img src="docs/images/side-panel-en.png" width="32%" alt="Agent team sidebar, Session tab: the lead docs (idle), the collaboration mode switch set to Delegation, two members that are done, and the data flow with the task split, sub-agent contexts and reports">
+<img src="docs/images/session-overview-en.png" width="32%" alt="Session dashboard, Overview: the mode switch, the run's title, state and batch, the run's details, the two members, and the data-flow parties">
+<img src="docs/images/session-parts-en.png" width="32%" alt="Session dashboard, Task split page: batch 1 with the folder-overlap check passed and two packets handed to writer and checker, both done">
+</p>
 
-A **delegation** run has its own parts: the task split (with the folder-overlap check), each sub-agent's isolated context, the reports and the lead's summary:
+When the lead hands work to a member, its chat shows a **Handed off to agent** card, and an **Update from worker** card when the member reports. Press a card to read the task or the result; press the member's name to open its chat:
 
-![Delegation run, Task split tab: batch 1 with two packets handed to two candidate members, an overlap warning, and who used the split](docs/images/delegation-split-en.png)
+![The lead's chat: two Handed off to agent cards for writer#144B and checker#1197, then an expanded Update from worker card with writer's result](docs/images/delegation-cards-en.png)
 
-The **Agent teams** screen holds the global presets (a lead model, a candidate pool and a mode, usable in every project) and every project's teams:
+The **Agent teams** screen holds the global presets (rename, copy into a project, edit, delete) and every project's teams:
 
-![Agent teams screen: header with counts, two team presets with their candidate members, and project cards whose team rows show mode, language, lead model and role counts](docs/images/teams-screen-en.png)
+![Agent teams screen: counts for projects, teams and presets; the Docs crew preset with its lead and candidates and the Copy to project, Edit, Rename and Delete buttons; the project proj with its teams docs and notes](docs/images/teams-screen-en.png)
 
 ### Start a team from Paseo's own new chat
 
@@ -49,21 +53,24 @@ Workspaces that run a team get a badge in the sidebar with their mode, or how ma
 
 ### What you get in Paseo
 
-- **Agent team panel** (a workspace tab): describe a goal, or leave it empty and let a planner read the project. The planner proposes roles, candidate members and a mode. You review the proposal (searchable provider and model pickers, folders, instructions, **Edit team with AI** with undo and redo) and press **Apply**. The panel then starts the lead in that workspace. Here you can also **Save as preset**, **Reapply** and **Reset session**.
+- **Team editor** (the **Agent team** tab of a workspace): describe a goal, or leave it empty and let a planner read the project. The planner proposes roles, candidate members and a mode as a draft. The editor has a section for each part of the team: the overview, the collaboration mode, the lead, fixed roles and candidates. It also has searchable provider and model pickers, folders, instructions, **Edit with AI** with undo and redo, and a live check. **Save** writes the team file. **Start a session** writes it and starts the lead, with an optional first request, a mode and a language for that session, in this workspace or a new one. **Save as preset**, **Apply again** and **Reset session** are here too.
+- **Agent team sidebar** (the right sidebar's **+** menu, or **Open the Ensemble side panel** in the Command Center): **Session** has the workspace's lead with its mode switch, the members (open their chat) and the run's data flow (each part opens the session dashboard). **Start** starts a lead from this workspace's team or a preset. **Teams** lists the project's teams and presets.
+- **Delegation cards**: the lead's chat shows **Handed off to agent** when a member is given work and **Update from worker** when it reports (marked Failed or Stopped when its turn did not complete). The cards open the member's chat and the session dashboard.
+- **Members work unattended**: each member starts in its provider's full-access mode (`bypassPermissions` for Claude, `full-access` for Codex, …), and the plugin allows any tool permission prompt a member still raises, so delegated work never waits for you to click Allow. The lead keeps its reviewed auto mode.
 - **Session dashboard**: open it from the lead's **Dashboard** pill, the Command Center or `/dashboard`. It shows one conversation only, with tabs:
-  - **Overview**: the mode switch (it shows a lock 🔒 once Auto has chosen), the run's header and numbers, and the data-flow diagram with the latest flows.
+  - **Overview**: the mode switch (it shows a lock 🔒 once Auto has chosen), the run's header and details, the members and the data flow with the latest flows.
   - **Agents**: the agent tree, with three densities, closed agents and sub-agents.
-  - **One tab per part of the mode**: in team mode the brief, Kanban task board, plan approval, chat-style team board and file claims; in delegation mode the task split, sub-agent contexts, reports and summary.
+  - **One page per part of the mode**: in team mode the brief, Kanban task board, plan approval, chat-style team board and file claims; in delegation mode the task split, sub-agent contexts, reports and summary.
   - **Data flow**: every step of the run.
 - **Agent dashboard**: every session of the workspace, as trees.
-- **Agent teams** screen (sidebar): every project's teams (open, reconnect, delete), and the **team presets**. **New task from preset** writes the team for a new or free workspace and starts the lead with your request.
+- **Agent teams** screen (sidebar): every project's teams (open, reconnect, delete), and the **team presets**: rename one, copy it into a project as a team file, edit or delete it. **New task from preset** writes the team for a new or free workspace and starts the lead with your request.
 - **Candidate members**: a pool of models described by what each is good at and must not do. The lead assigns work by those descriptions and never uses a model outside the pool.
 - **Language**: the UI follows Paseo's language (English, 한국어, 日本語, 简体中文). Set a team's agent language to Chinese or English to choose the prompts, the tool texts and the language of the agents' replies.
 
 ### Requirements
 
 - Paseo **0.16.0** or later, with **Settings → Plugins → Enable plugins** on.
-- **Paseo tools for agents** on: Settings → your host → **Orchestration → Enable Paseo tools** (`daemon.mcp.injectIntoAgents`, off by default). The team tools are served next to Paseo's own tools. While this setting is off, the team panel warns you, and Apply and Reset session refuse to run.
+- **Paseo tools for agents** on: Settings → your host → **Orchestration → Enable Paseo tools** (`daemon.mcp.injectIntoAgents`, off by default). The team tools are served next to Paseo's own tools. While this setting is off, the team editor warns you, and Start a session, Apply again and Reset session refuse to run.
 - At least one ready provider (`paseo provider ls`).
 
 ### Install
@@ -110,7 +117,7 @@ A team file can have roles, candidates or both, but not neither. Every field is 
 
 - [docs/guide.md](docs/guide.md): the full manual, covering creating and changing teams, team mode in detail, presets, candidates, dashboards, permissions and limitations.
 - [OVERVIEW.md](OVERVIEW.md): a short behaviour reference.
-- Versions: each release is a git tag `vX.Y.Z` (the version in `package.json`). Install one with `paseo plugin add git:DueGin/paseo-ensemble --ref v0.5.1`.
+- Versions: each release is a git tag `vX.Y.Z` (the version in `package.json`). Install one with `paseo plugin add git:DueGin/paseo-ensemble --ref v0.6.0`.
 - Development: `npm run typecheck && npm test` (unit tests). `PASEO_E2E=1 npx vitest run tests/collab.e2e.test.ts` runs both modes with real agents on a daemon (`PASEO_URL` picks it; use a throwaway daemon with its own `--home`).
 
 ---
@@ -132,19 +139,25 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
 
 ### 截图
 
-一次真实的中文团队运行（三个角色，Haiku）。**概览**页有运行概况、数字和数据流图：
+**团队编辑器**按分区排布，并实时检查：顶部显示**有效**或问题数量，点开能看到问题列表，点某个问题就跳到对应字段。**保存**只写入团队文件，**开始会话**写入后启动协调器。
 
-![会话仪表盘概览：运行头部显示团队 MA-08、状态和轮次，下面是任务、成员、帖子、用时四个数字，再往下是从协调器和三个成员连到需求简报、共享任务板、计划审批、团队黑板、文件认领的数据流图](docs/images/session-overview-zh.png)
+![团队编辑器的协作方式分区：自动、团队、委派（已选）、无四种模式卡片，各自写明模式编号和含义；下面是智能体语言切换，以及协调器的提供方和模型](docs/images/team-editor-zh.png)
 
-**共享任务板**（看板）和**团队黑板**（对话式，按轮次分组，协调器的帖子靠右）：
+**智能体团队侧边栏**在「文件」「更改」旁边：**会话**页显示本工作区的协调器、模式切换、成员和本次运行的数据流；**开始**页用本工作区的团队或预设启动协调器；**团队**页列出项目里的团队和预设。**会话仪表盘**完整展示一次运行：
 
-![共享任务板：待办、进行中、已完成三列，每张卡片显示任务编号、角色、标题、负责人和更新时间](docs/images/task-board-zh.png)
+<p>
+<img src="docs/images/side-panel-zh.png" width="32%" alt="智能体团队侧边栏的会话页：协调器、协作方式切换、成员和数据流">
+<img src="docs/images/session-overview-zh.png" width="32%" alt="会话仪表盘概览：协作方式切换，运行标题、状态和批次，运行信息，两个已完成的成员，数据流">
+<img src="docs/images/session-parts-zh.png" width="32%" alt="会话仪表盘的任务拆分页：第 1 批，目录重叠检查和交给两个成员的任务包">
+</p>
 
-![团队黑板：顶部是每个读者的已读进度，下面是按帖子类型筛选和对话气泡式的帖子](docs/images/team-board-zh.png)
+协调器把工作交给成员时，对话里会出现**已移交给智能体**卡片；成员汇报后出现**来自工作者的更新**卡片。展开卡片可以看任务或结果，点成员名字打开它的对话：
 
-**智能体团队**页：全局预设和各项目的团队：
+![协调器对话：writer#9727 和 checker#56B4 的两张「已移交给智能体」卡片，以及两人的「来自工作者的更新」卡片](docs/images/delegation-cards-zh.png)
 
-![智能体团队页：顶部统计，团队预设卡片和候选成员，项目卡片中的团队行显示模式、语言、协调器模型和角色数](docs/images/teams-screen-zh.png)
+**智能体团队**页：全局预设（重命名、复制到项目、编辑、删除）和各项目的团队：
+
+![智能体团队页：项目、团队、预设三个数字；Docs crew 预设显示协调器、候选成员，以及复制到项目、编辑、重命名、删除按钮；项目 proj 下的团队 docs 和 notes](docs/images/teams-screen-zh.png)
 
 ### 在 Paseo 自带的新会话里组队
 
@@ -156,21 +169,24 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
 
 ### 在 Paseo 里能用到的
 
-- **智能体团队面板**（工作区标签页）：写一个目标，或者留空，让规划 agent 阅读项目。它会提出角色、候选成员和协作模式。你审阅提案（provider 和模型可搜索选择，可设置目录和说明，可以**用 AI 修改团队**并撤销重做），然后点**应用**，面板就在该工作区启动协调器。这里还可以**另存为预设**、**重新应用**、**重置会话**。
+- **团队编辑器**（工作区的「智能体团队」标签页）：写一个目标，或者留空让规划 agent 阅读项目，它会把角色、候选成员和协作模式作为草稿提出来。编辑器按团队的组成分区：概览、协作方式、协调器、固定角色、候选成员；provider 和模型可搜索选择，可设置目录和说明，可以**用 AI 编辑**并撤销重做，问题实时检查。**保存**写入团队文件；**开始会话**写入后启动协调器，可以附带第一条需求，并为这次会话选择模式和语言，在当前工作区或新工作区里运行。**另存为预设**、**重新应用**、**重置会话**也在这里。
+- **智能体团队侧边栏**（右侧边栏的 **+** 菜单，或命令中心的「打开团队侧边栏」）：**会话**页有本工作区的协调器和模式切换、成员（可打开其对话）、本次运行的数据流（每个组件都能打开会话仪表盘）；**开始**页用本工作区的团队或预设启动协调器；**团队**页列出项目的团队和预设。
+- **委派卡片**：成员接到工作时，协调器对话里出现「已移交给智能体」；成员汇报时出现「来自工作者的更新」（完成、失败或取消）。卡片可以打开成员的对话和会话仪表盘。
+- **成员全权限运行**：每个成员都用其 provider 的完全访问模式启动（Claude 是 `bypassPermissions`，Codex 是 `full-access`……），成员仍然弹出的工具权限请求由插件自动允许，委派出去的工作不会停下来等你点「允许」。协调器仍用带审核的自动模式。
 - **会话仪表盘**：从协调器的**仪表盘**按钮、命令中心或 `/dashboard` 打开。它只显示这一段会话，分为几个标签页：
-  - **概览**：模式切换（自动模式确定后显示 🔒）、运行头部和数字、数据流图和最近的数据流。
+  - **概览**：模式切换（自动模式确定后显示 🔒）、运行头部和信息、成员、数据流和最近的数据流。
   - **智能体**：智能体树，有三种密度，能显示已关闭的 agent 和子 agent。
   - **每个组件一页**：团队模式下是需求简报、看板式任务板、计划审批、对话式团队黑板、文件认领；委派模式下是任务拆分、子智能体上下文、结果汇报、汇总。
   - **数据流**：运行中的每一步。
 - **智能体仪表盘**：以树的形式展示工作区里的所有会话。
-- **智能体团队**页（侧边栏）：各项目的团队（打开、重新关联、删除），以及**团队预设**。**用预设开始新任务**会为新建或空闲的工作区写好团队，并把你的需求作为协调器的第一条消息启动它。
+- **智能体团队**页（侧边栏）：各项目的团队（打开、重新关联、删除），以及**团队预设**：可以重命名、复制到项目里成为团队文件、编辑或删除。**用预设开始新任务**会为新建或空闲的工作区写好团队，并把你的需求作为协调器的第一条消息启动它。
 - **候选成员**：一组模型，每个写明擅长什么、不要交给它什么。协调器按描述分工，绝不使用池子以外的模型。
 - **语言**：界面跟随 Paseo 的语言（English、한국어、日本語、简体中文）。团队的智能体语言可以设为中文或英文，决定提示词、工具文字和智能体回复所用的语言。
 
 ### 要求
 
 - Paseo **0.16.0** 或更新，并打开 **设置 → 插件 → 启用插件**。
-- 打开**给 agent 提供 Paseo 工具**：设置 → 你的主机 → **Orchestration → Enable Paseo tools**（`daemon.mcp.injectIntoAgents`，默认关闭）。团队工具和 Paseo 自带工具一起提供给 agent；这个设置关闭时，团队面板会提示，「应用」和「重置会话」也会拒绝执行。
+- 打开**给 agent 提供 Paseo 工具**：设置 → 你的主机 → **Orchestration → Enable Paseo tools**（`daemon.mcp.injectIntoAgents`，默认关闭）。团队工具和 Paseo 自带工具一起提供给 agent；这个设置关闭时，团队编辑器会提示，「开始会话」「重新应用」「重置会话」也会拒绝执行。
 - 主机上至少有一个可用的 provider（`paseo provider ls`）。
 
 ### 安装
@@ -200,7 +216,7 @@ paseo plugin ls      # paseo-ensemble 应为 "running"
 
 - [docs/guide.md](docs/guide.md)：完整使用手册（英文），包括创建和修改团队、团队模式细节、预设、候选成员、仪表盘、权限和限制。
 - [OVERVIEW.md](OVERVIEW.md)：简短的行为说明。
-- 版本：每个发布版本都有对应的 git tag `vX.Y.Z`（即 `package.json` 里的版本号）。安装指定版本：`paseo plugin add git:DueGin/paseo-ensemble --ref v0.5.1`。
+- 版本：每个发布版本都有对应的 git tag `vX.Y.Z`（即 `package.json` 里的版本号）。安装指定版本：`paseo plugin add git:DueGin/paseo-ensemble --ref v0.6.0`。
 - 开发：`npm run typecheck && npm test` 运行单元测试；`PASEO_E2E=1 npx vitest run tests/collab.e2e.test.ts` 用真实 agent 在 daemon 上把两种模式各跑一遍（用 `PASEO_URL` 指定 daemon；请用带独立 `--home` 的临时 daemon）。
 
 ## License

@@ -5,6 +5,7 @@ import { contributeDraftTeam } from "./client/DraftTeam";
 import { contributeTeamBadge } from "./client/TeamBadge";
 import { messages } from "./client/i18n";
 import { contributeSessionAccess, SESSION_PANEL } from "./client/session-access";
+import { SIDE_PANEL_ID, SidePanel } from "./client/SidePanel";
 import { TeamPanel } from "./client/TeamPanel";
 import { SCREEN_ID, TeamScreen, TeamSidebarItem } from "./client/TeamScreen";
 
@@ -14,6 +15,14 @@ export default function contribute(client: PluginClientContext) {
   // One session only; opened from that session (composer pill, Command Center, /dashboard), in the right sidebar.
   client.addAgentPanel({ id: SESSION_PANEL, title: messages.message("session.title"), icon: "Network", locations: ["explorer", "workspace"], Component: SessionDashboard });
   client.addWorkspacePanel({ id: "team", title: messages.message("panelTitle"), icon: "Users", locations: ["workspace"], Component: TeamPanel });
+  // The right sidebar's Ensemble panel, as in Orca: the session, starting a team, and the project's teams and presets.
+  client.addWorkspacePanel({
+    id: SIDE_PANEL_ID,
+    title: messages.message("panelTitle"),
+    icon: "Bot",
+    locations: ["explorer"],
+    Component: (props) => <SidePanel {...props} openPanel={(id, options) => client.openPanel(id, options)} openScreen={(input) => client.openScreen(input)} />,
+  });
   client.addScreen({ id: SCREEN_ID, title: messages.message("commandTitle"), Component: (props) => <TeamScreen {...props} openTeamPanel={(workspaceId) => client.openPanel("team", { workspaceId })} /> });
   client.addSidebarHeaderItem({ id: "team", title: messages.message("commandTitle"), Component: TeamSidebarItem });
   client.addCommandCenterItem({
@@ -24,6 +33,16 @@ export default function contribute(client: PluginClientContext) {
     context: "workspace",
     onSelect({ openPanel }) {
       openPanel("team");
+    },
+  });
+  client.addCommandCenterItem({
+    id: "ensemble-panel",
+    title: messages.message("sideUi.panelCommand"),
+    icon: "Bot",
+    keywords: ["ensemble", "team", "session", "团队", "会话"],
+    context: "workspace",
+    onSelect({ openPanel }) {
+      openPanel(SIDE_PANEL_ID, { location: "explorer" });
     },
   });
   // Paseo 0.16: pick a team in a new agent's own draft composer, and that agent becomes its lead.

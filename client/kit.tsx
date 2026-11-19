@@ -310,8 +310,8 @@ export function Button({ k, label, icon, variant = "secondary", size = "md", onP
   );
 }
 
-/** A segmented control: one of a few choices, on a muted track. */
-export function Segmented<V extends string>({ k, value, options, onChange, stretch, disabled }: { k: Kit; value: V; options: readonly { value: V; label: string; icon?: string }[]; onChange(value: V): void; stretch?: boolean; disabled?: boolean }) {
+/** A segmented control: one of a few choices, on a muted track. `equal` (with `stretch`) gives every option the same width, for a tab bar. */
+export function Segmented<V extends string>({ k, value, options, onChange, stretch, equal, disabled }: { k: Kit; value: V; options: readonly { value: V; label: string; icon?: string }[]; onChange(value: V): void; stretch?: boolean; equal?: boolean; disabled?: boolean }) {
   return (
     <View style={{ flexDirection: "row", padding: 2, gap: 2, borderRadius: k.radius, backgroundColor: k.c.muted, borderWidth: 1, borderColor: k.c.border, alignSelf: stretch ? "stretch" : "flex-start" }}>
       {options.map((option) => {
@@ -323,10 +323,12 @@ export function Segmented<V extends string>({ k, value, options, onChange, stret
             accessibilityState={{ selected: on, disabled: !!disabled }}
             disabled={disabled}
             onPress={() => onChange(option.value)}
-            style={{ flex: stretch ? 1 : undefined, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: k.radius - 3, backgroundColor: on ? k.c.card : "transparent", opacity: disabled && !on ? 0.55 : 1 }}
+            // Stretched (a narrow panel): options share the spare width on top of their own, so a long label keeps its
+            // room, and they shorten only when the labels don't fit at all.
+            style={{ flexGrow: stretch ? 1 : undefined, flexShrink: stretch ? 1 : undefined, flexBasis: stretch && equal ? 0 : "auto", minWidth: 0, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: stretch ? 4 : 10, paddingVertical: 5, borderRadius: k.radius - 3, backgroundColor: on ? k.c.card : "transparent", opacity: disabled && !on ? 0.55 : 1 }}
           >
             {option.icon ? <Icon name={option.icon} size={13} color={on ? k.c.fg : k.c.mutedFg} /> : null}
-            <Text style={{ color: on ? k.c.fg : k.c.mutedFg, fontSize: 12, fontWeight: on ? "600" : "500" }} numberOfLines={1}>
+            <Text style={{ color: on ? k.c.fg : k.c.mutedFg, fontSize: 12, fontWeight: on ? "600" : "500", flexShrink: 1 }} numberOfLines={1}>
               {option.label}
             </Text>
           </Pressable>

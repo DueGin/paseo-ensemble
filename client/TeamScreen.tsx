@@ -1,58 +1,193 @@
+// The Agent teams screen: every project's teams (open, reconnect, delete) and the global presets every project can start
+// from (create, edit, rename, copy into a project, delete, start a task). `params.project` opens a new team for that project.
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
-import { usePaseo, useRpc, useTranslation } from "@getpaseo/plugin/client";
-import { Icon, SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from "react-native";
+import { useRpc, useTranslation } from "@getpaseo/plugin/client";
+import { SidebarRow, useToast } from "@getpaseo/plugin/client/ui";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { ScrollView, View } from "react-native";
 import { withAlpha } from "../shared/color";
+import { teamDeleteRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
 import { messages } from "./i18n";
-import { teamDeleteRpc, teamProjectsRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
+import { Badge, Button, Callout, Card, Chip, Empty, MODE_LOOK, SectionHeader, Spinner, StatTile, T, Tile, useKit, type Kit } from "./kit";
 import { PresetsSection, StartFromPresetDialog, usePresets } from "./Presets";
-import { Button, PROJECT_TEAMS_KEY, styles, TeamEditor } from "./TeamPanel";
+import { PROJECTS_KEY, runtimeText, TEAM_KEY, useProjectTeams, type ProjectTeam, type ProjectTeams } from "./side/data";
+import { LANGUAGE_NAMES } from "./side/preset-card";
+import type { Translate } from "./side/run-parts";
+import { TeamEditor } from "./TeamPanel";
 
 export const SCREEN_ID = "team";
 
-/** A collaboration mode's color, the same as on the session dashboard. */
-const MODE_TONE = { auto: "#a78bfa", team: "#34d399", delegation: "#818cf8", none: "#9ca3af" } as const;
-
-/** Every project and its teams, refetched when the host's projects change. */
-function useProjectTeams() {
-  const list = useRpc(teamProjectsRpc);
-  const paseo = usePaseo();
-  const queryClient = useQueryClient();
-  useEffect(() => paseo.projects.subscribe(() => void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY })), [paseo, queryClient]);
-  return useQuery({ queryKey: PROJECT_TEAMS_KEY, queryFn: () => list({}) });
-}
+type RestoreRpc = typeof teamRestoreRpc;
+type Restored = Extract<RpcOutput<RestoreRpc>, { ok: true }>;
 
 export function TeamSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   const { t } = useTranslation(messages);
   return <SidebarRow icon="Users" label={t("commandTitle")} active={currentScreen?.screenId === SCREEN_ID} onPress={() => openScreen({ screenId: SCREEN_ID })} />;
 }
 
+interface TeamActions {
+  busy: { reconnect: boolean; delete: boolean };
+  reconnecting: string | null;
+  confirming: string | null;
+  setReconnecting(key: string | null): void;
+  setConfirming(key: string | null): void;
+  reconnect(input: { projectId: string; file: string; workspaceId: string }): void;
+  restore(input: { projectId: string; file: string }): void;
+  remove(input: { projectId: string; file: string }): void;
+  restoreProblem(projectId: string, file: string): string[];
+}
+
+/** One team of a project: its workspace, mode, lead and size, and Open (or Reconnect) and Delete. */
+function TeamRow({ k, t, project, team, actions, openTeamPanel }: { k: Kit; t: Translate; project: ProjectTeams; team: ProjectTeam; actions: TeamActions; openTeamPanel?: (workspaceId: string) => void }) {
+  const look = MODE_LOOK[team.mode];
+  const key = `${project.id}:${team.file}`;
+  const occupied = new Set(project.teams.map((entry) => entry.workspaceId).filter((id) => id != null));
+  const free = project.workspaces.filter((workspace) => !occupied.has(workspace.id));
+  const problems = actions.restoreProblem(project.id, team.file);
+  return (
+    <Card k={k} tone={team.workspaceId ? look.tone : k.c.warn} style={{ gap: 8, padding: 10 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <Tile k={k} icon={look.icon} tone={look.tone} size={28} />
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <T k={k} v="strong" numberOfLines={1} style={{ flexShrink: 1 }}>
+              {team.orchestratorWorkspace}
+            </T>
+            <Badge k={k} label={t(`mode.${team.mode}`)} tone={look.tone} />
+            {team.language ? <T k={k} v="tiny">{LANGUAGE_NAMES[team.language]}</T> : null}
+          </View>
+          <T k={k} v="tiny" numberOfLines={1}>
+            {[`${t("screen.lead")} ${runtimeText(team.orchestrator.provider, team.orchestrator.model)}`, t("screen.roles", { count: team.roles }), ...(team.candidates ? [t("screen.candidates", { count: team.candidates })] : [])].join(" · ")}
+          </T>
+        </View>
+      </View>
+      {team.goal ? (
+        <T k={k} v="small" numberOfLines={2}>
+          {team.goal}
+        </T>
+      ) : null}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <T k={k} v="tiny" numberOfLines={1} style={{ flex: 1, minWidth: 0, fontFamily: "Menlo" }}>
+          {team.file}
+        </T>
+        {!team.workspaceId ? <Badge k={k} label={t("screen.workspaceMissing")} tone={k.c.warn} icon="Unlink" /> : null}
+      </View>
+      {actions.reconnecting === key && !team.workspaceId ? (
+        <Card k={k} inset style={{ gap: 8 }}>
+          <T k={k} v="small">{t("screen.reconnectPick")}</T>
+          {free.length ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              {free.map((workspace) => (
+                <Chip key={workspace.id} k={k} icon="Folder" label={workspace.title} onPress={actions.busy.reconnect ? undefined : () => actions.reconnect({ projectId: project.id, file: team.file, workspaceId: workspace.id })} />
+              ))}
+            </View>
+          ) : (
+            <T k={k} v="muted">{t("screen.noWorkspaceToPick")}</T>
+          )}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <Button k={k} icon="Plus" label={t("screen.startNewWorkspace")} size="sm" busy={actions.busy.reconnect} onPress={() => actions.restore({ projectId: project.id, file: team.file })} />
+            <Button k={k} variant="ghost" label={t("review.cancel")} size="sm" disabled={actions.busy.reconnect} onPress={() => actions.setReconnecting(null)} />
+          </View>
+          {actions.busy.reconnect ? <T k={k} v="tiny">{t("result.applying")}</T> : null}
+          {problems.map((problem) => (
+            <T key={problem} k={k} v="tiny" style={{ color: k.c.bad }}>
+              {problem}
+            </T>
+          ))}
+        </Card>
+      ) : actions.confirming === key ? (
+        <Callout k={k} tone={k.c.bad} icon="Trash2">
+          <View style={{ gap: 8 }}>
+            <T k={k} v="small">{t("screen.deleteConfirm", { file: team.file })}</T>
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+              <Button k={k} variant="danger" label={t("screen.deleteYes")} size="sm" busy={actions.busy.delete} onPress={() => actions.remove({ projectId: project.id, file: team.file })} />
+              <Button k={k} variant="ghost" label={t("review.cancel")} size="sm" disabled={actions.busy.delete} onPress={() => actions.setConfirming(null)} />
+            </View>
+          </View>
+        </Callout>
+      ) : (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+          {team.workspaceId ? (
+            <Button k={k} variant="primary" icon="ArrowUpRight" label={t("screen.openTeam")} size="sm" disabled={!openTeamPanel} onPress={() => openTeamPanel?.(team.workspaceId!)} />
+          ) : (
+            <Button k={k} icon="Link" label={t("screen.reconnect")} size="sm" disabled={actions.busy.reconnect} onPress={() => actions.setReconnecting(key)} />
+          )}
+          <View style={{ flex: 1 }} />
+          <Button k={k} variant="ghost" icon="Trash2" label={t("screen.deleteTeam")} size="sm" disabled={actions.busy.delete} onPress={() => actions.setConfirming(key)} />
+        </View>
+      )}
+    </Card>
+  );
+}
+
+/** A project: its name and folder, its teams, and New team / New task from preset. */
+function ProjectCard({ k, t, project, presets, actions, openTeamPanel, onNewTeam, onStartFromPreset }: { k: Kit; t: Translate; project: ProjectTeams; presets: number; actions: TeamActions; openTeamPanel?: (workspaceId: string) => void; onNewTeam(): void; onStartFromPreset(): void }) {
+  return (
+    <Card k={k} style={{ flex: 1, minWidth: 0, padding: 0, gap: 0, overflow: "hidden" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, padding: 12, backgroundColor: withAlpha(k.c.primary, 0.07), borderBottomWidth: 1, borderBottomColor: k.c.border }}>
+        <Tile k={k} icon="Folder" size={32} />
+        <View style={{ flex: 1, minWidth: 0, gap: 1 }}>
+          <T k={k} v="h3" numberOfLines={1} style={{ fontSize: 15 }}>
+            {project.name}
+          </T>
+          <T k={k} v="tiny" numberOfLines={1} style={{ fontFamily: "Menlo" }}>
+            {project.root}
+          </T>
+        </View>
+        <Badge k={k} label={t("sideUi.screen.teamCount", { count: project.teams.length })} icon="Users" />
+      </View>
+      <View style={{ padding: 10, gap: 8 }}>
+        {project.errors.length ? (
+          <Callout k={k} tone={k.c.bad} icon="TriangleAlert">
+            {project.errors.map((error) => (
+              <T key={error} k={k} v="tiny" style={{ color: k.c.fg }}>
+                {error}
+              </T>
+            ))}
+          </Callout>
+        ) : null}
+        {!project.teams.length ? (
+          <Empty k={k} icon="Users">
+            {t("screen.noTeams")}
+          </Empty>
+        ) : null}
+        {project.teams.map((team) => (
+          <TeamRow key={team.file} k={k} t={t} project={project} team={team} actions={actions} openTeamPanel={openTeamPanel} />
+        ))}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, paddingTop: 2 }}>
+          <Button k={k} icon="Plus" label={t("screen.newTeam")} size="sm" onPress={onNewTeam} />
+          {presets ? <Button k={k} icon="Play" label={t("presets.start")} size="sm" onPress={onStartFromPreset} /> : null}
+        </View>
+      </View>
+    </Card>
+  );
+}
+
 /** Browse every project's agent teams, open an existing team's panel, or create a new team. */
-export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginScreenProps & { openTeamPanel?: (workspaceId: string) => void }) {
-  const s = useMemo(() => styles(theme.colors, layout.compact), [theme, layout.compact]);
+export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }: PluginScreenProps & { openTeamPanel?: (workspaceId: string) => void }) {
+  const k = useKit(theme, layout.compact);
   const { t, locale } = useTranslation(messages);
   const projects = useProjectTeams();
   const [listWidth, setListWidth] = useState(0);
   const columns = layout.compact || listWidth < 720 ? 1 : listWidth < 1120 ? 2 : 3;
-  const projectRows = [];
-  for (let index = 0; index < (projects.data?.length ?? 0); index += columns) {
-    projectRows.push(projects.data!.slice(index, index + columns));
-  }
   const toast = useToast();
-  const [projectId, setProjectId] = useState<string | null>(null);
+  // The project a new team is being made for; the side panel opens the screen with `params.project`.
+  const [projectId, setProjectId] = useState((params?.project ?? null) as string | null);
+  useEffect(() => {
+    if (params?.project) setProjectId(params.project);
+  }, [params?.project]);
   const queryClient = useQueryClient();
   const remove = useRpc(teamDeleteRpc);
   const reconnect = useRpc(teamReconnectRpc);
   const restore = useRpc(teamRestoreRpc);
   // The team row waiting for a second press, keyed by project and file.
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const [reconnecting, setReconnecting] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(null as string | null);
+  const [reconnecting, setReconnecting] = useState(null as string | null);
   const invalidateTeams = () => {
-    void queryClient.invalidateQueries({ queryKey: PROJECT_TEAMS_KEY });
-    void queryClient.invalidateQueries({ queryKey: ["workspace-agents", "team"] });
+    void queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
+    void queryClient.invalidateQueries({ queryKey: TEAM_KEY });
     void queryClient.invalidateQueries({ queryKey: ["dashboard", "agents"] });
     void queryClient.invalidateQueries({ queryKey: ["dashboard", "roster"] });
   };
@@ -78,8 +213,7 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
     },
     onError: (error) => toast.error(String(error)),
   });
-
-  const openApplied = (result: Extract<RpcOutput<typeof teamRestoreRpc>, { ok: true }>) => {
+  const openApplied = (result: Restored) => {
     if (result.cleanup.length) toast.error(t("result.cleanupFailed", { failure: result.cleanup.join("; ") }));
     navigation?.openWorkspace({ workspaceId: result.workspaces[0]!.id });
   };
@@ -92,49 +226,70 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
       openApplied(result);
     },
   });
-  const reconnectBusy = reconnected.isPending || restored.isPending;
   const presetSettings = usePresets();
   const presets = presetSettings.status === "ready" ? presetSettings.values.presets : [];
-  const [startingFor, setStartingFor] = useState<string | null>(null);
+  const [startingFor, setStartingFor] = useState(null as string | null);
+  const actions: TeamActions = {
+    busy: { reconnect: reconnected.isPending || restored.isPending, delete: deleted.isPending },
+    reconnecting,
+    confirming,
+    setReconnecting: (key) => {
+      restored.reset();
+      setReconnecting(key);
+    },
+    setConfirming,
+    reconnect: (input) => reconnected.mutate(input),
+    restore: (input) => restored.mutate(input),
+    remove: (input) => deleted.mutate(input),
+    restoreProblem: (project, file) =>
+      restored.variables?.projectId === project && restored.variables.file === file ? [...(restored.error ? [String(restored.error)] : []), ...(restored.data && !restored.data.ok ? restored.data.errors : [])] : [],
+  };
 
+  const pad = layout.compact ? 12 : 24;
   if (projectId) {
+    const project = projects.data?.find((entry) => entry.id === projectId);
     return (
-      <View style={s.screen}>
-        <View style={[s.row, { padding: layout.compact ? 12 : 20, paddingBottom: 0 }]}>
-          <Button s={s} secondary label={t("screen.back")} onPress={() => setProjectId(null)} />
+      <View style={{ flex: 1, backgroundColor: k.c.bg }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: pad, paddingTop: pad, paddingBottom: 4 }}>
+          <Button k={k} variant="ghost" icon="ArrowLeft" label={t("screen.back")} onPress={() => setProjectId(null)} />
+          {project ? (
+            <T k={k} v="muted" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
+              {project.name}
+            </T>
+          ) : null}
         </View>
-        <TeamEditor
-          theme={theme}
-          layout={layout}
-          navigation={navigation}
-          target={{ projectId }}
-          onApplied={openApplied}
-        />
+        <TeamEditor theme={theme} layout={layout} navigation={navigation} target={{ projectId }} onApplied={openApplied} />
       </View>
     );
   }
 
+  const list = projects.data ?? [];
+  const teamCount = list.reduce((sum, project) => sum + project.teams.length, 0);
+  const missing = list.reduce((sum, project) => sum + project.teams.filter((team) => !team.workspaceId).length, 0);
+  const rows: ProjectTeams[][] = [];
+  for (let index = 0; index < list.length; index += columns) rows.push(list.slice(index, index + columns));
   return (
-    <ScrollView style={s.screen} contentContainerStyle={s.body}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingBottom: 4 }}>
-        <View style={{ width: 40, height: 40, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(theme.colors.accent, 0.16) }}>
-          <Icon name="Users" size={20} color={theme.colors.accent} />
+    <ScrollView style={{ flex: 1, backgroundColor: k.c.bg }} contentContainerStyle={{ padding: pad, gap: 18 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+        <Tile k={k} icon="Users" size={44} />
+        <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
+          <T k={k} v="h1">
+            {t("screen.title")}
+          </T>
+          <T k={k} v="muted">{t("screen.subtitle")}</T>
         </View>
-        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
-          <Text style={[s.text, { fontSize: 20, fontWeight: "700" }]}>{t("screen.title")}</Text>
-          <Text style={s.muted}>{t("screen.subtitle")}</Text>
-        </View>
-        {projects.data ? (
-          <Text style={[s.muted, { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: theme.colors.surface1, borderWidth: 1, borderColor: theme.colors.border }]}>
-            {t("screen.stats", { projects: projects.data.length, teams: projects.data.reduce((sum, project) => sum + project.teams.length, 0), presets: presets.length })}
-          </Text>
-        ) : null}
       </View>
-      <PresetsSection s={s} colors={theme.colors} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+        <StatTile k={k} label={t("sideUi.screen.projects")} value={projects.data ? String(list.length) : "–"} />
+        <StatTile k={k} label={t("sideUi.screen.teams")} value={projects.data ? String(teamCount) : "–"} hint={missing ? t("sideUi.screen.missing", { count: missing }) : undefined} />
+        <StatTile k={k} label={t("sideUi.screen.presets")} value={presetSettings.status === "ready" ? String(presets.length) : "–"} />
+      </View>
+
+      <PresetsSection colors={theme.colors} compact={layout.compact} projects={list} />
       <StartFromPresetDialog
-        s={s}
         colors={theme.colors}
-        project={projects.data?.find((project) => project.id === startingFor) ?? null}
+        compact={layout.compact}
+        project={list.find((project) => project.id === startingFor) ?? null}
         presets={presets}
         onClose={() => setStartingFor(null)}
         onStarted={(result) => {
@@ -144,97 +299,39 @@ export function TeamScreen({ theme, layout, navigation, openTeamPanel }: PluginS
           else openTeamPanel?.(result.workspaceId);
         }}
       />
-      {projects.isLoading ? <Text style={s.muted}>{t("loading")}</Text> : null}
-      {projects.error ? <Text style={s.danger}>{String(projects.error)}</Text> : null}
-      <View style={{ gap: 12 }} onLayout={(event) => {
-        const width = Math.round(event.nativeEvent.layout.width);
-        setListWidth((current) => current === width ? current : width);
-      }}>
-      {projectRows.map((row) => (
-        <View key={row[0]!.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
-      {row.map((project) => {
-        const occupiedWorkspaces = new Set(project.teams.map((team) => team.workspaceId).filter((id) => id != null));
-        const reconnectWorkspaces = project.workspaces.filter((workspace) => !occupiedWorkspaces.has(workspace.id));
-        return (
-        <View key={project.id} style={[s.card, { flex: 1, minWidth: 0, padding: 0, gap: 0, overflow: "hidden" }]}>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 12, backgroundColor: withAlpha(theme.colors.accent, 0.1), borderBottomWidth: 1, borderBottomColor: theme.colors.border }}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[s.text, { fontSize: 17, fontWeight: "700" }]}>{project.name}</Text>
-              <Text style={[s.muted, { fontSize: 11 }]} numberOfLines={1}>{project.root}</Text>
-            </View>
-            <View style={{ alignItems: "flex-end", gap: 6 }}>
-              <Pressable accessibilityRole="button" accessibilityLabel={t("screen.newTeam")} onPress={() => setProjectId(project.id)}>
-                <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>{`+ ${t("screen.newTeam")}`}</Text>
-              </Pressable>
-              {presets.length ? (
-                <Pressable accessibilityRole="button" accessibilityLabel={t("presets.start")} onPress={() => setStartingFor(project.id)}>
-                  <Text style={{ color: theme.colors.accent, fontWeight: "600" }}>{`▶ ${t("presets.start")}`}</Text>
-                </Pressable>
-              ) : null}
-            </View>
+
+      <View style={{ gap: 12 }}>
+        <SectionHeader k={k} icon="FolderOpen" title={t("sideUi.screen.projects")} subtitle={t("sideUi.screen.projectsHint")} count={projects.data ? list.length : undefined} />
+        {projects.isLoading ? (
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Spinner k={k} />
+            <T k={k} v="muted">{t("loading")}</T>
           </View>
-          <View style={{ padding: 10, gap: 8 }}>
-          {project.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>)}
-          {!project.teams.length ? <Text style={s.muted}>{t("screen.noTeams")}</Text> : null}
-          {project.teams.map((team) => (
-            <View key={team.file} style={{ minWidth: 0, maxWidth: "100%", gap: 6, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.surface1, borderLeftWidth: 3, borderLeftColor: team.workspaceId ? MODE_TONE[team.mode] : theme.colors.statusWarning }}>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-                <Icon name="Users" size={14} color={theme.colors.foregroundMuted} />
-                <Text numberOfLines={1} style={[s.text, { flexShrink: 1, minWidth: 0, fontSize: 14, fontWeight: "700" }]}>{team.orchestratorWorkspace}</Text>
-                <Text style={{ color: theme.colors.foreground, fontSize: 11, fontWeight: "600", paddingHorizontal: 7, paddingVertical: 1, borderRadius: 999, borderWidth: 1, borderColor: withAlpha(MODE_TONE[team.mode], 0.5), backgroundColor: withAlpha(MODE_TONE[team.mode], 0.14) }}>{t(`mode.${team.mode}`)}</Text>
-                {team.language ? <Text style={[s.muted, { fontSize: 11 }]}>{team.language === "zh" ? "中文" : "English"}</Text> : null}
-                <View style={{ flexDirection: "row", gap: 6, marginLeft: "auto" }}>
-                  {team.workspaceId ? (
-                    <Button s={s} label={t("screen.openTeam")} onPress={() => openTeamPanel?.(team.workspaceId!)} />
-                  ) : (
-                    <Button s={s} label={t("screen.reconnect")} disabled={reconnectBusy} onPress={() => { restored.reset(); setReconnecting(`${project.id}:${team.file}`); }} />
-                  )}
-                  <Button s={s} secondary label={t("screen.deleteTeam")} disabled={deleted.isPending} onPress={() => setConfirming(`${project.id}:${team.file}`)} />
-                </View>
-              </View>
-              {team.goal ? <Text style={[s.text, { fontSize: 12 }]} numberOfLines={2}>{team.goal}</Text> : null}
-              <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-                <Text style={[s.muted, { fontSize: 11 }]}>{t("screen.lead")}</Text>
-                <Text style={{ color: theme.colors.foreground, fontSize: 11, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4, backgroundColor: theme.colors.surface2 }}>{team.orchestrator.provider}/{team.orchestrator.model}</Text>
-                <Text style={[s.muted, { fontSize: 11 }]}>· {t("screen.roles", { count: team.roles })}{team.candidates ? ` · ${t("screen.candidates", { count: team.candidates })}` : ""}</Text>
-                {!team.workspaceId ? <Text style={{ color: theme.colors.statusWarning, fontSize: 11, fontWeight: "600" }}>· {t("screen.workspaceMissing")}</Text> : null}
-              </View>
-              {!team.workspaceId && reconnecting === `${project.id}:${team.file}` ? (
-                <View style={[s.card, { width: "100%" }]}>
-                  <Text style={s.text}>{t("screen.reconnectPick")}</Text>
-                  {!reconnectWorkspaces.length ? <Text style={s.muted}>{t("screen.noWorkspaceToPick")}</Text> : null}
-                  <View style={s.row}>
-                    {reconnectWorkspaces.map((workspace) => (
-                      <Button key={workspace.id} s={s} label={workspace.title} disabled={reconnectBusy} onPress={() => reconnected.mutate({ projectId: project.id, file: team.file, workspaceId: workspace.id })} />
-                    ))}
-                    <Button s={s} secondary label={t("screen.startNewWorkspace")} disabled={reconnectBusy} onPress={() => restored.mutate({ projectId: project.id, file: team.file })} />
-                    <Button s={s} secondary label={t("review.cancel")} disabled={reconnectBusy} onPress={() => setReconnecting(null)} />
-                  </View>
-                  {reconnectBusy ? <View style={s.row}><ActivityIndicator color={theme.colors.accent} /><Text style={s.muted}>{t(restored.isPending ? "result.applying" : "loading")}</Text></View> : null}
-                  {restored.variables?.projectId === project.id && restored.variables.file === team.file ? <>
-                    {restored.error ? <Text style={s.danger}>{String(restored.error)}</Text> : null}
-                    {restored.data && !restored.data.ok ? restored.data.errors.map((error) => <Text key={error} style={s.danger}>{error}</Text>) : null}
-                  </> : null}
-                </View>
-              ) : null}
-              {confirming === `${project.id}:${team.file}` ? (
-                <View style={[s.card, { width: "100%" }]}>
-                  <Text style={s.text}>{t("screen.deleteConfirm", { file: team.file })}</Text>
-                  <View style={s.row}>
-                    <Button s={s} label={t("screen.deleteYes")} disabled={deleted.isPending} onPress={() => deleted.mutate({ projectId: project.id, file: team.file })} />
-                    <Button s={s} secondary label={t("review.cancel")} disabled={deleted.isPending} onPress={() => setConfirming(null)} />
-                  </View>
-                </View>
-              ) : null}
+        ) : null}
+        {projects.error ? (
+          <Callout k={k} tone={k.c.bad} icon="TriangleAlert">
+            <T k={k} v="small">{String(projects.error)}</T>
+          </Callout>
+        ) : null}
+        {projects.data && !list.length ? <Empty k={k} icon="Folder">{t("sideUi.screen.noProjects")}</Empty> : null}
+        <View
+          style={{ gap: 12 }}
+          onLayout={(event) => {
+            const width = Math.round(event.nativeEvent.layout.width);
+            setListWidth((current) => (current === width ? current : width));
+          }}
+        >
+          {rows.map((row) => (
+            <View key={row[0]!.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
+              {row.map((project) => (
+                <ProjectCard key={project.id} k={k} t={t} project={project} presets={presets.length} actions={actions} openTeamPanel={openTeamPanel} onNewTeam={() => setProjectId(project.id)} onStartFromPreset={() => setStartingFor(project.id)} />
+              ))}
+              {Array.from({ length: columns - row.length }, (_, index) => (
+                <View key={`spacer-${index}`} style={{ flex: 1, minWidth: 0 }} />
+              ))}
             </View>
           ))}
-          </View>
         </View>
-        );
-      })}
-          {Array.from({ length: columns - row.length }, (_, index) => <View key={`spacer-${index}`} style={{ flex: 1, minWidth: 0 }} />)}
-        </View>
-      ))}
       </View>
     </ScrollView>
   );

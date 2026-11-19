@@ -20,34 +20,34 @@ team:       request → intake with you → confirmed brief → members on a sha
 ## Requirements
 
 - Paseo 0.16.0 or newer, and at least one ready provider on the host.
-- Paseo tools turned on for agents: Settings → Orchestration → **Enable Paseo tools** (off by default). The orchestrator and members use the plugin's team tools, which Paseo serves next to its own tools. The team panel warns, and Apply and Reset session refuse, while it is off.
+- Paseo tools turned on for agents: Settings → Orchestration → **Enable Paseo tools** (off by default). The orchestrator and members use the plugin's team tools, which Paseo serves next to its own tools. The team editor warns, and Start a session, Apply again and Reset session refuse, while it is off.
 
 ## Creating a team
 
-- Open the **Agent team** workspace panel, or run **Agent teams** from the Command Center.
-- The sidebar's **Agent teams** screen lists every project with its teams. From there you can open a team's panel in its orchestrator's workspace, start a new team for a project, and reconnect a team whose orchestrator workspace was renamed (see Changing a team).
+- Open the workspace's **Agent team** tab (the team editor), the **Teams** tab of the Agent team sidebar, or run **Agent teams** from the Command Center.
+- The sidebar's **Agent teams** screen lists every project with its teams. From there you can open a team's editor in its orchestrator's workspace, start a new team for a project, and reconnect a team whose orchestrator workspace was renamed (see Changing a team).
 - Describe your goal to have a planner propose the team, leave the goal empty to have it read the project and work the goal out itself, or start with an empty team. The planner proposes fixed roles and/or candidate members, and a collaboration mode.
-- Review the proposal, then press **Apply**.
+- Review the draft in the team editor, then press **Save** (writes the team file only) or **Start a session** (writes it and starts the lead, with an optional first request and the session's mode and agent language, in this workspace, the one named in the team, or a new one).
 
 ### Reviewing a proposal
 
-- Review the names, models, folders and instructions of every role before you press **Apply**. Every role runs in the orchestrator's workspace.
+- Review the names, models, folders and instructions of every role before you start a session. The editor checks the team as you edit: its header shows **Valid** or the number of problems, and each problem links to its field. Every role runs in the orchestrator's workspace.
 - A blank role is named `role`. If that name is already in use, it gets a `#` and four random uppercase hex characters, such as `role#4F2A`.
-- **Edit team with AI**: type a request under the role list. A request that names a role, or whose work fits one, changes that role; a new role is added only when asked for or when no role fits. A planner proposes the revised team, which is applied to the draft at once with a notice of what changed. **Undo** and **Redo** step through AI edits. Nothing is written to the team file until you press **Apply**.
-- **Edit instructions** opens a dialog with the full instructions. **Improve with AI** asks an instructions planner to propose a rewrite, which you can apply or discard. **Save** only updates the draft; the team's file is written by **Apply**.
+- **Edit team with AI**: type a request under the role list. A request that names a role, or whose work fits one, changes that role; a new role is added only when asked for or when no role fits. A planner proposes the revised team, which is applied to the draft at once with a notice of what changed. **Undo** and **Redo** step through AI edits. Nothing is written to the team file until you press **Save** or **Start a session**.
+- **Edit instructions** opens a dialog with the full instructions. **Improve with AI** asks an instructions planner to propose a rewrite, which you can apply or discard. **Save** in the dialog only updates the draft; the team's file is written by the editor's **Save** or **Start a session**.
 - A proposal survives leaving the screen. When you reopen it, the plugin picks up the newest planner for that workspace or project, whether it is still running or ready to review.
 - Proposing again, or cancelling the review, archives the earlier planner.
 
-### Applying
+### Starting a session
 
-Apply does four things in order:
+Start a session does four things in order:
 
 1. Writes the team to its own file. A new team goes to `.agents/teams/<orchestrator workspace>.json` in the registered project root. A team that already has a file keeps it, including the older `.agents/team.json`.
 2. Reuses a project workspace whose title matches the orchestrator's workspace, or creates it.
-3. Starts an orchestrator. If the team's orchestrator is already running on the same provider and model, it is told to re-read the team instead, so no second orchestrator starts. Apply also refuses a team that uses a workspace another team of the project already uses.
-4. Archives the project's plugin-labelled planner agents and any unused, otherwise empty `Team planner` workspace. If cleanup fails, the team is still applied and the failure is shown as a warning.
+3. Starts an orchestrator. If the team's orchestrator is already running on the same provider and model, it is told to re-read the team instead, so no second orchestrator starts. Starting also refuses a team that uses a workspace another team of the project already uses.
+4. Archives the project's plugin-labelled planner agents and any unused, otherwise empty `Team planner` workspace. If cleanup fails, the session still starts and the failure is shown as a warning.
 
-Apply may also write the allow rules described under Agent modes and permissions. After Apply you are taken to the orchestrator's workspace.
+Starting may also write the allow rules described under Agent modes and permissions. You are then taken to the orchestrator's workspace.
 
 ## Starting a team from a new chat
 
@@ -55,14 +55,17 @@ A new agent's draft and the New workspace screen have a **Team** control in the 
 
 ## Working with the orchestrator
 
-Press **Open orchestrator** after applying, or find the agent titled **Orchestrator** in the orchestrator's workspace, and talk to it in plain language. It starts and coordinates members only through the plugin's team tools, which give each role exactly its provider, model and mode and put it under the orchestrator on the dashboard.
+After **Start a session**, find the agent titled **Orchestrator** in the orchestrator's workspace (the sidebar's **Session** tab opens its chat), and talk to it in plain language. It starts and coordinates members only through the plugin's team tools, which give each role exactly its provider, model and mode and put it under the orchestrator on the dashboard.
+
+- **Members work unattended**: a member starts in its provider's unattended mode (see Agent modes and permissions), and the plugin allows any tool permission prompt it still raises, so delegated work never waits for you to click Allow.
+- **Delegation cards**: the orchestrator's chat shows **Handed off to agent** (or **Given more work**) when a member is given work, and **Update from worker** with the result when the member's turn ends (marked **Failed** or **Stopped** when it did not complete). A card expands to the task or the result, its member's name opens the member's chat, and its network icon opens the session dashboard. Paseo groups these rows with the turn's tool calls, so they sit inside the turn's tool group.
 
 ### Choosing the collaboration mode
 
 - **In advance**: the team's mode (**Auto**, **Team** or **Delegation**) is set in the team editor and saved in the team file. A planner proposing a team picks it from the goal, usually **Auto**.
 - **Per session**: the orchestrator's chat has a **Mode** pill next to the composer, and the session dashboard has a mode switch. Switching changes the mode for that orchestrator session only and tells the orchestrator; a run in progress keeps its mode. Picking the team file's mode again clears the switch.
-- **Auto**: the orchestrator picks per request. The first run it starts fixes the session to that mode: the pills and the switch then show it locked (🔒) and refuse to change it, until the session is reset in the Agent team panel. **None** (无) means no collaboration: the orchestrator does the work itself, and starting members is refused.
-- **Language**: each team has an agent language (中文 or English; the app's language when unset), set in the team editor, the preset editor or the team's panel. It picks the prompts, the replies and the tool descriptions and results the plugin gives the orchestrator and members, so a Chinese team works and replies in Chinese. A team without a language takes the app's when it is applied or its orchestrator restarted, and a running orchestrator is replaced when the language changes.
+- **Auto**: the orchestrator picks per request. The first run it starts fixes the session to that mode: the pills and the switch then show it locked (🔒) and refuse to change it, until the session is reset in the team editor. **None** (无) means no collaboration: the orchestrator does the work itself, and starting members is refused.
+- **Language**: each team has an agent language (中文 or English; the app's language when unset), set in the team editor, the preset editor or when starting a session. It picks the prompts, the replies and the tool descriptions and results the plugin gives the orchestrator and members, so a Chinese team works and replies in Chinese. A team without a language takes the app's when it is applied or its orchestrator restarted, and a running orchestrator is replaced when the language changes.
 - **Per request**: in **Auto**, the orchestrator picks for each request; you can also name a mode in the request.
 - The plugin enforces the mode: in Team mode it refuses to delegate, and in Delegation mode it refuses to start a team run.
 
@@ -84,7 +87,7 @@ Press **Open orchestrator** after applying, or find the agent titled **Orchestra
 
 ### Global team presets
 
-The Agent teams screen holds a library of team presets shared by every project on the host: a collaboration mode (Auto, Team or Delegation), the orchestrator's model and a pool of candidate members. Press **New task from preset** on any project to pick a preset, describe the request and choose a new or free workspace; the plugin writes the team for that workspace from the preset, starts the orchestrator with the request as its first message and opens it. A team's panel can also fill a new team from a preset, or save its team as a preset. Removing the plugin installation deletes the presets; teams started from them keep their own copy. Presets saved by this plugin under its former id, `paseo-agent-team`, can be imported once from the same screen.
+The Agent teams screen holds a library of team presets shared by every project on the host: a collaboration mode (Auto, Team or Delegation), the orchestrator's model and a pool of candidate members. Press **New task from preset** on any project to pick a preset, describe the request and choose a new or free workspace; the plugin writes the team for that workspace from the preset, starts the orchestrator with the request as its first message and opens it. The team editor can also fill a new team from a preset, or save its team as a preset. **Rename** renames a preset in place, and **Copy to project** writes it into a project as a team file (`.agents/teams/<preset>.json`) that you then **Reconnect** to a workspace. The Agent team sidebar's **Start** tab starts a lead from a preset, and its **Teams** tab has Copy to project and Rename too. Removing the plugin installation deletes the presets; teams started from them keep their own copy. Presets saved by this plugin under its former id, `paseo-agent-team`, can be imported once from the same screen.
 
 ### Candidate members
 
@@ -92,21 +95,21 @@ Candidate members are a pool of models, not roles. Each has a provider and model
 
 ## Several teams per project
 
-- A project can run several teams, one per workspace. A team belongs to the workspace its orchestrator runs in, and the **Agent team** panel of that workspace shows that team.
+- A project can run several teams, one per workspace. A team belongs to the workspace its orchestrator runs in, and the **Agent team** tab of that workspace shows that team.
 - Each team has its own file in `.agents/teams/`, and each team's orchestrator reads only its own file, so teams do not change each other.
-- To create another team, open the **Agent team** panel in a workspace that has no team yet and create one as usual.
+- To create another team, open the **Agent team** tab in a workspace that has no team yet and create one as usual.
 
 ```
-Workspace A panel → team A (.agents/teams/a.json) → orchestrator in A
-Workspace B panel → team B (.agents/teams/b.json) → orchestrator in B
+Workspace A editor → team A (.agents/teams/a.json) → orchestrator in A
+Workspace B editor → team B (.agents/teams/b.json) → orchestrator in B
 ```
 
 ## Changing a team
 
-- Open the **Agent team** panel in the team's orchestrator workspace and press **Edit**. Change the team and press **Apply**.
-- Or edit the team's file directly and press **Apply again** in the panel. The panel shows the file's path, the current team, and flags any provider or model the host cannot run.
+- Open the team editor (the **Agent team** tab) in the team's orchestrator workspace, change the team and press **Save**, then **Apply again** so a running orchestrator re-reads it.
+- Or edit the team's file directly and press **Apply again**. The editor shows the file's path, whether it has changes the file doesn't have yet, and flags any provider or model the host cannot run.
 - **Reset session**: to reset the orchestrator session with the same team, press **Reset session** next to **Apply again**. Use it instead of `/clear`. Sending `/clear` in the orchestrator's chat makes Paseo archive that agent and start a new one with no labels and no instructions, so the plugin no longer treats it as the team's orchestrator. **Reset session** asks for confirmation, then archives the labelled orchestrator and starts a new one with the same team, provider, model, mode and instructions, read from the team file. Role sessions are kept. Close the agent that `/clear` created yourself.
-- **Reconnect**: if you rename the orchestrator's workspace in Paseo, the team shows as "workspace not found" on the **Agent teams** screen. Press **Reconnect** on its row and pick the renamed workspace. That rewrites `orchestrator.workspace` in the team's file (and in an old `.agents/team.json` for the same workspace) to the new title. The file name and agents are not changed, and Reconnect refuses a workspace another team uses. If the orchestrator's workspace is gone rather than renamed, the Reconnect panel also offers **Start in a new workspace**, which runs the team like **Apply** with its saved file, creating the workspace named in the file if needed and starting the orchestrator there. The panel lists only the project's workspaces that no other team uses, since one workspace runs one team. When none is free, the panel says so and offers only that button and Cancel.
+- **Reconnect**: if you rename the orchestrator's workspace in Paseo, the team shows as "workspace not found" on the **Agent teams** screen. Press **Reconnect** on its row and pick the renamed workspace. That rewrites `orchestrator.workspace` in the team's file (and in an old `.agents/team.json` for the same workspace) to the new title. The file name and agents are not changed, and Reconnect refuses a workspace another team uses. If the orchestrator's workspace is gone rather than renamed, the Reconnect panel also offers **Start in a new workspace**, which runs the team like **Start a session** with its saved file, creating the workspace named in the file if needed and starting the orchestrator there. The panel lists only the project's workspaces that no other team uses, since one workspace runs one team. When none is free, the panel says so and offers only that button and Cancel.
 
 ## Deleting a team
 
@@ -120,9 +123,11 @@ Workspace B panel → team B (.agents/teams/b.json) → orchestrator in B
 
 ## Watching agents
 
+The **Agent team sidebar** (the right sidebar's **+** menu, or **Open the Ensemble side panel** in the Command Center) has three tabs. **Session** shows the workspace's orchestrator and state, the mode switch, the members (each opens its chat) and the latest run's data flow, whose parts open the session dashboard. **Start** starts an orchestrator from this workspace's team or a preset, here or in a new workspace. **Teams** lists the project's teams and the presets.
+
 There are two dashboards. Both show agents as a tree: an agent started by another agent appears under it.
 
-- **Session dashboard**: one conversation only. Open it from a collaborating agent's **Dashboard** pill next to the composer, from the Command Center (**Agent dashboard: this session**), or with `/dashboard` in the chat. It opens in the right sidebar and shows the session the agent belongs to: its orchestrator and every agent started under it, including members started in other workspaces, and nothing else from the project. A team lead's session has tabs: **Overview**, **Agents** (the tree), one tab per part of the mode, and **Data flow**. The overview has the mode switch, the run's header (mode, state, round or batch, and its numbers: tasks done, members working, posts or batches, time), the roles the orchestrator formed, and its **data flow**: who takes part (you, the orchestrator, the members, the plugin), the parts of the mode (team: the brief, the shared task board, plan approval, the team board, file claims; delegation, after MA-04: the task split, the sub-agents' contexts, the reports, the summary), the latest flows between them with a moving dot for the last 30 seconds, and each part's newest event. A narrow panel stacks the participants above the parts. The latest flows are listed below, and every part opens its tab with its full content, who used it, and its history; **Data flow** lists every step. The task board is a Kanban (To do, In progress, Done, and Dropped when there are any) when the panel is wide enough, and stacked sections otherwise; the team board reads like a chat, grouped by round, with the orchestrator's posts on the right and long posts folded.
+- **Session dashboard**: one conversation only. Open it from a collaborating agent's **Dashboard** pill next to the composer, from the Command Center (**Agent dashboard: this session**), or with `/dashboard` in the chat. It opens in the right sidebar and shows the session the agent belongs to: its orchestrator and every agent started under it, including members started in other workspaces, and nothing else from the project. A team lead's session has tabs: **Overview**, **Agents** (the tree), one tab per part of the mode, and **Data flow**. The overview has the mode switch, the run's header (mode, state, round or batch) and its details (run, lead, language, when it was created and last changed, how long it has run), the members and the roles the orchestrator formed, and its **data flow**: who takes part (you, the orchestrator, the members, the plugin), the parts of the mode (team: the brief, the shared task board, plan approval, the team board, file claims; delegation, after MA-04: the task split, the sub-agents' contexts, the reports, the summary), the latest flows between them with a moving dot for the last 30 seconds, and each part's newest event. A narrow panel stacks the participants above the parts. The latest flows are listed below, and every part opens its tab with its full content, who used it, and its history; **Data flow** lists every step. The task board is a Kanban (To do, In progress, Done, and Dropped when there are any) when the panel is wide enough, and stacked sections otherwise; the team board reads like a chat, grouped by round, with the orchestrator's posts on the right and long posts folded.
 
 The flow is recorded by the plugin as the run changes (`shared/flow.ts`, kept in the run file, the last 400 steps). In delegation mode every `team_delegate` call, and every follow-up the orchestrator sends one member, is a batch: its packets, the folder-overlap check, and the orchestrator's reply after it collected the batch's reports, which is recorded as the batch's summary. Delegation has no check step (MA-04), and the summary page says so. Notices the plugin sends by itself (a waiting plan, a verdict, a finished round) are recorded only once the send went through.
 - **Agent dashboard**: the workspace's sessions. Open it from the workspace's tab launcher, as a tab or in the right sidebar. It shows the trees whose top agent runs in this workspace, and a **Sessions** row to narrow it to one of them. Paseo doesn't tell a sidebar panel which chat has focus, so the session to show is picked here or handed over from the session itself.
@@ -147,7 +152,7 @@ The choice is remembered per tab, like **Show closed**. Glow, arrival flash, sig
 
 ## Agent modes and permissions
 
-Planner, orchestrator and member agents start in the provider's reviewed auto mode when it has one. The order is:
+Planner and orchestrator agents start in the provider's reviewed auto mode when it has one. The order is:
 
 1. Codex's **Auto-review** (`auto-review`).
 2. Otherwise an `auto` mode, such as Claude's **Auto** mode (`auto`).
@@ -157,10 +162,10 @@ Planner, orchestrator and member agents start in the provider's reviewed auto mo
 6. Otherwise agents use the default mode.
 
 - Auto mode and Auto-review send permission requests to an automatic reviewer. The unattended mode keeps running without asking you.
-- Members are started by the plugin, so a role's mode and features are always applied as given.
+- **Members** start in their provider's unattended mode instead: the mode marked unattended, otherwise the one Paseo marks dangerous, otherwise a mode named like bypass, full access or yolo (for example `bypassPermissions` for Claude and `full-access` for Codex). A provider with none of these starts members like the orchestrator. The plugin allows any tool permission prompt a member raises; plan, question and mode prompts are left to you. Members can therefore run commands and change files without asking, so give a team only work you would let an unattended agent do.
 - The planner is told not to change files, but it is not technically prevented from doing so.
 
-**Allow rules in `.claude/settings.local.json`.** When the orchestrator runs on Claude, Apply and Reset session add the orchestrator's team tools (`mcp__paseo__team_status`, `mcp__paseo__team_delegate` and the others) to the project's `.claude/settings.local.json`, so Claude's Auto-mode reviewer doesn't block the orchestrator from starting a member in an unattended mode. When a role runs on Claude, the board tools are added too. Remove the rules to undo them. Check that you don't commit the file: Claude Code ignores it in git only when Claude Code itself created it.
+**Allow rules in `.claude/settings.local.json`.** When the orchestrator runs on Claude, Start a session, Apply again and Reset session add the orchestrator's team tools (`mcp__paseo__team_status`, `mcp__paseo__team_delegate` and the others) to the project's `.claude/settings.local.json`, so Claude's Auto-mode reviewer doesn't block the orchestrator from starting a member in an unattended mode. When a role runs on Claude, the board tools are added too. Remove the rules to undo them. Check that you don't commit the file: Claude Code ignores it in git only when Claude Code itself created it.
 
 ## Data and privacy
 
@@ -185,9 +190,9 @@ English, Korean, Japanese and Simplified Chinese UI text are included. Daemon-si
 - **Session focus.** Paseo doesn't tell a sidebar panel which chat has focus. The session dashboard follows the session it was opened from; open it again from another chat, or pick a session in the Agent dashboard's **Sessions** row.
 - **Run timing.** The plugin moves a run along from Paseo's turn events. If the plugin was reloaded while members worked, the orchestrator's next wait catches up on members that finished meanwhile. A wait returns after at most 9 minutes; the orchestrator then waits again or answers you, and the plugin tells it when the run has finished.
 - **Workspace matching.** A team is matched to its workspace by `orchestrator.workspace`. Renaming that workspace in Paseo or in the file detaches the team until the two match again. After renaming in Paseo, press **Reconnect** on the team's row, or edit `orchestrator.workspace` in the file.
-- **Older team files.** A team file without a mode runs in delegation mode. A file written by an older version may still list a workspace for a role; Apply removes it.
+- **Older team files.** A team file without a mode runs in delegation mode. A file written by an older version may still list a workspace for a role; starting a session or Apply again removes it.
 - **Reset instead of /clear.** Sending `/clear` to the orchestrator makes Paseo replace it with an unlabelled agent that has no team tools. Use **Reset session**.
-- **Sidebar order.** Paseo's sidebar puts a workspace it has not seen yet at the top of its project, so a workspace that Apply creates appears there. The plugin cannot set the sidebar order.
+- **Sidebar order.** Paseo's sidebar puts a workspace it has not seen yet at the top of its project, so a workspace that Start a session creates appears there. The plugin cannot set the sidebar order.
 - **Single-page lists.** Workspace and agent lists are read as a single page. Very long lists can make an existing workspace get missed and created again, and the dashboards can miss agents beyond that page.
 - **Client navigation.** On Paseo hosts without client navigation, the dashboard cards cannot be pressed.
 - **Sub-agent discovery.** Sub-agents started before the dashboard opened are found in the last 200 timeline items of each unarchived agent shown. A sub-agent found that way takes its status from the timeline and can read as finished while it still runs in the background.

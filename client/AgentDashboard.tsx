@@ -1,64 +1,48 @@
 import type { PluginAgentPanelProps, PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useTabState, useTranslation } from "@getpaseo/plugin/client";
-import { Icon, Loading } from "@getpaseo/plugin/client/ui";
+import { Icon } from "@getpaseo/plugin/client/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Animated,
-  Easing,
-  Platform,
-  Pressable,
-  ScrollView,
-  Text,
-  View,
-} from "react-native";
+import { Animated, Easing, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { z } from "zod";
 import { withAlpha } from "../shared/color";
 import { buildAgentForest, canArchive, canDismiss, dismissibleIds, sessionForest, sessionMembers, sessionRootOf, titleParts, workspaceForest, type AgentNode } from "../shared/agent-tree";
-import {
-  DASHBOARD_DENSITIES,
-  DEFAULT_DENSITY,
-  densityLayout,
-  type DashboardDensityLayout,
-} from "../shared/dashboard-density";
+import { agentLanguage } from "../shared/cleanup";
+import { DASHBOARD_DENSITIES, DEFAULT_DENSITY, densityLayout, type DashboardDensityLayout } from "../shared/dashboard-density";
 import { providerIcon } from "../shared/provider-icons";
 import { TEAM_MODES, type TeamMode } from "../shared/modes";
 import { teamRosterRpc, teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
-import {
-  applySubagentUpdate,
-  mergeSubagents,
-  subagentAgents,
-  subagentsFromTimeline,
-  type ProviderSubagent,
-} from "../shared/subagents";
+import { applySubagentUpdate, mergeSubagents, subagentAgents, subagentsFromTimeline, type ProviderSubagent } from "../shared/subagents";
 import { messages } from "./i18n";
-import { COMPONENT_PAGES, ComponentDetail, RunOverview, SessionTabs, type ComponentPage, type SessionTab } from "./RunComponents";
+import { Button, Callout, Dot, Empty, Segmented, Spinner, Tile, useKit, type Kit } from "./kit";
+import { COMPONENT_PAGES, ComponentDetail, ModeSwitch, PartTabs, pagesOf, RunOverview, SessionTabs, useSessionDetail, type ComponentPage, type SessionTab } from "./RunComponents";
 
-const RED = "#ff5a5f";
-const GLOW = "#ff9a9d";
-const AMBER = "#ffb347";
 const stateSchema = z.object({
   showClosed: z.boolean(),
   dismissed: z.array(z.string()).catch([]),
   density: z.enum(DASHBOARD_DENSITIES).catch(DEFAULT_DENSITY),
   /** The session picked in a workspace dashboard; null shows every session of the workspace. */
   session: z.string().nullable().catch(null),
-  /** A component page of the session's run, opened from the data-flow diagram; null shows the overview. */
+  /** "agents" for the agents tab; otherwise the part of the session's run whose page the overview shows (null: the first). */
   page: z.string().nullable().catch(null),
 });
 const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY, session: null as string | null, page: null as string | null };
 
-type Colors = PluginWorkspacePanelProps["theme"]["colors"];
+/** A packet's position along its cycle, offset per child. */
+type Phase = ReturnType<(typeof Animated)["modulo"]>;
+type TimeoutFn = typeof setTimeout;
+type Timer = ReturnType<TimeoutFn>;
+
 type TreeProps = {
   node: AgentNode;
-  colors: Colors;
+  k: Kit;
   compact: boolean;
   layout: DashboardDensityLayout;
   icons: Map<string, string | undefined>;
   flow: Animated.Value;
   glow: Animated.Value;
   packet: Animated.Value;
-  phase?: Animated.AnimatedModulo<number>;
+  phase?: Phase;
   open?: (id: string) => void;
   caption: (node: AgentNode) => string;
   waitingLabel: string;
@@ -75,116 +59,41 @@ function shortModel(model: string): string {
   return base.replace(/^claude-/, "");
 }
 
-function Logo({
-  node,
-  icons,
-  colors,
-  size,
-}: {
-  node: AgentNode;
-  icons: TreeProps["icons"];
-  colors: Colors;
-  size: number;
-}) {
-  const icon = providerIcon(
-    node.agent.provider,
-    icons.get(node.agent.provider),
-  );
+/** The provider's mark on a muted tile. */
+function Logo({ node, icons, k, size }: { node: AgentNode; icons: TreeProps["icons"]; k: Kit; size: number }) {
+  const icon = providerIcon(node.agent.provider, icons.get(node.agent.provider));
   const svgSize = size >= 24 ? size - 10 : Math.max(9, size - 5);
   return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size / 3,
-        backgroundColor: colors.surface2,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      {icon.kind === "svg" ? (
-        <Icon
-          icon={{ svg: icon.svg }}
-          size={svgSize}
-          color={colors.foreground}
-        />
-      ) : (
-        <Text
-          style={{
-            color: colors.foreground,
-            fontWeight: "700",
-            fontSize: size / 2,
-          }}
-        >
-          {icon.letter}
-        </Text>
-      )}
+    <View style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), backgroundColor: k.c.muted, borderWidth: 1, borderColor: withAlpha(k.c.fg, 0.06), alignItems: "center", justifyContent: "center" }}>
+      {icon.kind === "svg" ? <Icon icon={{ svg: icon.svg }} size={svgSize} color={k.c.fg} /> : <Text style={{ color: k.c.fg, fontWeight: "700", fontSize: size / 2 }}>{icon.letter}</Text>}
     </View>
   );
 }
 
-function Badge({
-  node,
-  colors,
-  flow,
-  waitingLabel,
-  layout,
-}: Pick<TreeProps, "node" | "colors" | "flow" | "waitingLabel" | "layout">) {
+/** The agent's state on its card: waiting, a pulsing dot while it runs, or a tinted mark for attention and done. */
+function StatusMark({ node, k, flow, waitingLabel, layout }: Pick<TreeProps, "node" | "k" | "flow" | "waitingLabel" | "layout">) {
   if (node.waiting)
-    return (
-      <Text
-        style={{
-          color: colors.foregroundMuted,
-          fontSize: layout.captionFontSize,
-          lineHeight: layout.autoWidth ? 12 : undefined,
-          fontWeight: "700",
-        }}
-      >
-        {waitingLabel}
-      </Text>
-    );
+    return <Text style={{ color: k.c.mutedFg, fontSize: layout.captionFontSize, lineHeight: layout.autoWidth ? 12 : undefined, fontWeight: "700" }}>{waitingLabel}</Text>;
   if (!node.badge) return null;
   if (node.badge === "running") {
     const dotSize = layout.showChips ? 8 : layout.autoWidth ? 6 : 7;
-    return (
-      <Animated.View
-        style={{
-          width: dotSize,
-          height: dotSize,
-          borderRadius: dotSize / 2,
-          backgroundColor: AMBER,
-          opacity: flow.interpolate({
-            inputRange: [0, 0.5, 1],
-            outputRange: [0.45, 1, 0.45],
-          }),
-        }}
-      />
-    );
+    return <Animated.View style={{ width: dotSize, height: dotSize, borderRadius: dotSize / 2, backgroundColor: k.c.warn, opacity: flow.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.45, 1, 0.45] }) }} />;
   }
-  const badgeSize = layout.showChips ? 17 : layout.autoWidth ? 13 : 15;
-  const badgeFontSize = layout.showChips ? 11 : layout.autoWidth ? 9 : 10;
-  const badgeLineHeight = layout.showChips ? 14 : layout.autoWidth ? 11 : 12;
+  const size = layout.showChips ? 17 : layout.autoWidth ? 13 : 15;
+  const tone = node.badge === "attention" ? k.c.bad : k.c.ok;
   return (
-    <View
-      style={{
-        width: badgeSize,
-        height: badgeSize,
-        borderRadius: Math.ceil(badgeSize / 2),
-        backgroundColor:
-          node.badge === "attention" ? RED : colors.statusSuccess,
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <Text
-        style={{
-          color: colors.accentForeground,
-          fontSize: badgeFontSize,
-          fontWeight: "800",
-          lineHeight: badgeLineHeight,
-        }}
-      >
-        {node.badge === "attention" ? "!" : "✓"}
+    <View style={{ width: size, height: size, borderRadius: Math.ceil(size / 2), backgroundColor: withAlpha(tone, 0.2), borderWidth: 1, borderColor: withAlpha(tone, 0.5), alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ color: tone, fontSize: layout.showChips ? 10 : layout.autoWidth ? 8 : 9, fontWeight: "800", lineHeight: layout.showChips ? 13 : layout.autoWidth ? 10 : 11 }}>{node.badge === "attention" ? "!" : "✓"}</Text>
+    </View>
+  );
+}
+
+/** A small pill on a detailed card: the model, the effort, the mode. */
+function CardChip({ k, label, fontSize, accent, faded }: { k: Kit; label: string; fontSize: number; accent?: boolean; faded?: boolean }) {
+  return (
+    <View style={{ backgroundColor: accent ? withAlpha(k.c.primary, 0.14) : k.c.muted, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 2, maxWidth: "100%", opacity: faded ? 0.55 : 1 }}>
+      <Text numberOfLines={1} style={{ color: accent ? k.c.primary : k.c.mutedFg, fontSize, fontWeight: accent ? "600" : "500" }}>
+        {label}
       </Text>
     </View>
   );
@@ -200,25 +109,7 @@ function Card(
     onToggleSubagents?: () => void;
   },
 ) {
-  const {
-    node,
-    colors,
-    compact,
-    layout,
-    open,
-    caption,
-    flow,
-    glow,
-    icons,
-    root,
-    collapseRoot,
-    phase,
-    waitingLabel,
-    subagentCount = 0,
-    subagentCountLabel,
-    subagentsExpanded = false,
-    onToggleSubagents,
-  } = props;
+  const { node, k, compact, layout, open, caption, flow, glow, icons, root, collapseRoot, phase, waitingLabel, subagentCount = 0, subagentCountLabel, subagentsExpanded = false, onToggleSubagents } = props;
   const collapsed = Boolean(root && collapseRoot);
   const subagentPill =
     !collapsed && subagentCount > 0 && onToggleSubagents ? (
@@ -227,364 +118,141 @@ function Card(
         accessibilityLabel={subagentCountLabel}
         accessibilityState={{ expanded: subagentsExpanded }}
         onPress={onToggleSubagents}
-        style={{
-          backgroundColor: subagentsExpanded ? colors.accent : colors.surface2,
-          borderRadius: 6,
-          paddingHorizontal: 4,
-          paddingVertical: 1,
-          borderWidth: 1,
-          borderColor: colors.accent,
-        }}
+        style={{ backgroundColor: subagentsExpanded ? k.c.primary : withAlpha(k.c.primary, 0.14), borderRadius: 999, paddingHorizontal: 6, paddingVertical: 1, borderWidth: 1, borderColor: withAlpha(k.c.primary, 0.5) }}
       >
-        <Text
-          style={{
-            color: subagentsExpanded ? colors.accentForeground : colors.accent,
-            fontSize: layout.captionFontSize,
-            lineHeight: 11,
-            fontWeight: "700",
-          }}
-        >
-          +{subagentCount}
-        </Text>
+        <Text style={{ color: subagentsExpanded ? k.c.primaryFg : k.c.primary, fontSize: layout.captionFontSize, lineHeight: 12, fontWeight: "700" }}>+{subagentCount}</Text>
       </Pressable>
     ) : null;
 
   const briefLabel = node.role || node.title;
   const title = titleParts(node.title);
-  const titleContent = (fontSize: number) => <>{title.name}{title.id !== null ? <Text style={{ color: withAlpha(colors.foregroundMuted, 0.55), fontSize: Math.round(fontSize * 0.85) }}>{" " + title.id}</Text> : null}</>;
-  const briefBadgeSpace = node.waiting
-    ? 42
-    : node.badge === "running"
-      ? 10
-      : node.badge
-        ? 17
-        : 0;
-  const briefTitleMaxWidth =
-    layout.maxWidth -
-    (layout.padding + 2) * 2 -
-    2 -
-    layout.logoSize -
-    layout.gap -
-    briefBadgeSpace;
+  const titleContent = (fontSize: number) => (
+    <>
+      {title.name}
+      {title.id !== null ? <Text style={{ color: withAlpha(k.c.mutedFg, 0.7), fontSize: Math.round(fontSize * 0.85), fontWeight: "500" }}>{" " + title.id}</Text> : null}
+    </>
+  );
+  const briefBadgeSpace = node.waiting ? 42 : node.badge === "running" ? 10 : node.badge ? 17 : 0;
+  const briefTitleMaxWidth = layout.maxWidth - (layout.padding + 2) * 2 - 2 - layout.logoSize - layout.gap - briefBadgeSpace;
   const showBriefModel = Boolean(node.model && briefLabel.length < 11);
+  const status = <StatusMark node={node} k={k} flow={flow} waitingLabel={waitingLabel} layout={layout} />;
 
   const content = layout.autoWidth ? (
     collapsed ? (
       <>
-        <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
-        <Badge
-          node={node}
-          colors={colors}
-          flow={flow}
-          waitingLabel={waitingLabel}
-          layout={layout}
-        />
+        <Logo node={node} icons={icons} k={k} size={layout.logoSize} />
+        {status}
       </>
     ) : (
       <>
-        <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
-        <Text
-          numberOfLines={1}
-          style={{
-            flexShrink: 0,
-            maxWidth: briefTitleMaxWidth,
-            color: colors.foreground,
-            fontSize: layout.titleFontSize,
-            lineHeight: 14,
-            fontWeight: "700",
-          }}
-        >
+        <Logo node={node} icons={icons} k={k} size={layout.logoSize} />
+        <Text numberOfLines={1} style={{ flexShrink: 0, maxWidth: briefTitleMaxWidth, color: k.c.fg, fontSize: layout.titleFontSize, lineHeight: 14, fontWeight: "700" }}>
           {node.role ? briefLabel : titleContent(layout.titleFontSize)}
         </Text>
         {showBriefModel && node.model ? (
-          <Text
-            numberOfLines={1}
-            style={{
-              flexShrink: 1,
-              minWidth: 0,
-              color: colors.foregroundMuted,
-              fontSize: layout.captionFontSize,
-              lineHeight: 12,
-            }}
-          >
+          <Text numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, color: k.c.mutedFg, fontSize: layout.captionFontSize, lineHeight: 12 }}>
             {shortModel(node.model)}
           </Text>
         ) : null}
-        <View style={{ flexShrink: 0 }}>
-          <Badge
-            node={node}
-            colors={colors}
-            flow={flow}
-            waitingLabel={waitingLabel}
-            layout={layout}
-          />
-        </View>
+        <View style={{ flexShrink: 0 }}>{status}</View>
       </>
     )
   ) : !layout.showChips ? (
     collapsed ? (
       <>
-        <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
+        <Logo node={node} icons={icons} k={k} size={layout.logoSize} />
         {node.model ? (
-          <Text
-            numberOfLines={1}
-            style={{
-              color: colors.foregroundMuted,
-              fontSize: layout.captionFontSize,
-              textAlign: "center",
-              maxWidth: "100%",
-            }}
-          >
+          <Text numberOfLines={1} style={{ color: k.c.mutedFg, fontSize: layout.captionFontSize, textAlign: "center", maxWidth: "100%" }}>
             {shortModel(node.model)}
           </Text>
         ) : null}
-        <View style={{ position: "absolute", right: 4, top: 4 }}>
-          <Badge
-            node={node}
-            colors={colors}
-            flow={flow}
-            waitingLabel={waitingLabel}
-            layout={layout}
-          />
-        </View>
+        <View style={{ position: "absolute", right: 4, top: 4 }}>{status}</View>
       </>
     ) : (
       <>
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: layout.gap,
-          }}
-        >
-          <Logo
-            node={node}
-            icons={icons}
-            colors={colors}
-            size={layout.logoSize}
-          />
-          <Text
-            numberOfLines={1}
-            style={{
-              flex: 1,
-              minWidth: 0,
-              color: colors.foreground,
-              fontSize: layout.titleFontSize,
-              fontWeight: "700",
-            }}
-          >
+        <View style={{ flexDirection: "row", alignItems: "center", gap: layout.gap }}>
+          <Logo node={node} icons={icons} k={k} size={layout.logoSize} />
+          <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: k.c.fg, fontSize: layout.titleFontSize, fontWeight: "700" }}>
             {titleContent(layout.titleFontSize)}
           </Text>
-          <Badge
-            node={node}
-            colors={colors}
-            flow={flow}
-            waitingLabel={waitingLabel}
-            layout={layout}
-          />
+          {status}
         </View>
         {[node.model, layout.showMode ? node.mode : null].some(Boolean) ? (
-          <Text
-            numberOfLines={1}
-            style={{
-              color: colors.foregroundMuted,
-              fontSize: layout.captionFontSize,
-            }}
-          >
-            {[node.model, layout.showMode ? node.mode : null]
-              .filter(Boolean)
-              .join(" · ")}
+          <Text numberOfLines={1} style={{ color: k.c.mutedFg, fontSize: layout.captionFontSize }}>
+            {[node.model, layout.showMode ? node.mode : null].filter(Boolean).join(" · ")}
           </Text>
         ) : null}
       </>
     )
   ) : collapsed ? (
     <>
-      <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
+      <Logo node={node} icons={icons} k={k} size={layout.logoSize} />
       {node.model ? (
-        <Text
-          numberOfLines={2}
-          style={{
-            color: colors.foregroundMuted,
-            fontSize: layout.captionFontSize,
-            textAlign: "center",
-            maxWidth: "100%",
-          }}
-        >
+        <Text numberOfLines={2} style={{ color: k.c.mutedFg, fontSize: layout.captionFontSize, textAlign: "center", maxWidth: "100%" }}>
           {node.model}
         </Text>
       ) : null}
-      <View style={{ position: "absolute", right: 6, top: 6 }}>
-        <Badge
-          node={node}
-          colors={colors}
-          flow={flow}
-          waitingLabel={waitingLabel}
-          layout={layout}
-        />
-      </View>
+      <View style={{ position: "absolute", right: 6, top: 6 }}>{status}</View>
     </>
   ) : (
     <>
-      <Logo node={node} icons={icons} colors={colors} size={layout.logoSize} />
+      <Logo node={node} icons={icons} k={k} size={layout.logoSize} />
       <View style={{ flex: 1, minWidth: 0, gap: 3 }}>
         {layout.showCaption ? (
-          <Text
-            numberOfLines={1}
-            style={{
-              color: colors.foregroundMuted,
-              fontSize: layout.captionFontSize,
-              fontWeight: "700",
-              letterSpacing: 0.8,
-              textTransform: "uppercase",
-              paddingRight: 18,
-            }}
-          >
+          <Text numberOfLines={1} style={{ color: k.c.mutedFg, fontSize: layout.captionFontSize, fontWeight: "600", letterSpacing: 0.6, textTransform: "uppercase", paddingRight: 18 }}>
             {caption(node)}
           </Text>
         ) : null}
-        <Text
-          numberOfLines={1}
-          style={{
-            color: colors.foreground,
-            fontSize: layout.titleFontSize,
-            fontWeight: "700",
-          }}
-        >
+        <Text numberOfLines={1} style={{ color: k.c.fg, fontSize: layout.titleFontSize, fontWeight: "700" }}>
           {titleContent(layout.titleFontSize)}
         </Text>
-        <View
-          style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
-            gap: 4,
-            marginTop: 3,
-          }}
-        >
-          {[
-            node.model,
-            layout.showEffort ? node.effort : null,
-            layout.showMode ? node.mode : null,
-          ].map((chip, i) =>
-            chip ? (
-              <View
-                key={i}
-                style={{
-                  backgroundColor: colors.surface2,
-                  borderWidth: i === 2 ? 1 : 0,
-                  borderColor: colors.accent,
-                  borderRadius: 5,
-                  paddingHorizontal: 5,
-                  paddingVertical: 2,
-                  maxWidth: "100%",
-                  opacity: i === 1 && node.effortDefault ? 0.55 : 1,
-                }}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    color: i === 2 ? colors.accent : colors.foregroundMuted,
-                    fontSize: layout.captionFontSize,
-                  }}
-                >
-                  {chip}
-                </Text>
-              </View>
-            ) : null,
-          )}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+          {node.model ? <CardChip k={k} label={node.model} fontSize={layout.captionFontSize} /> : null}
+          {layout.showEffort && node.effort ? <CardChip k={k} label={node.effort} fontSize={layout.captionFontSize} faded={node.effortDefault} /> : null}
+          {layout.showMode && node.mode ? <CardChip k={k} label={node.mode} fontSize={layout.captionFontSize} accent /> : null}
         </View>
       </View>
-      <View style={{ position: "absolute", right: 9, top: 9 }}>
-        <Badge
-          node={node}
-          colors={colors}
-          flow={flow}
-          waitingLabel={waitingLabel}
-          layout={layout}
-        />
-      </View>
+      <View style={{ position: "absolute", right: 9, top: 9 }}>{status}</View>
     </>
   );
 
-  const fixedWidth = collapsed
-    ? layout.collapsedRootWidth
-    : compact
-      ? root
-        ? layout.rootWidth.compact
-        : layout.childWidth.compact
-      : root
-        ? layout.rootWidth.regular
-        : layout.childWidth.regular;
+  const fixedWidth = collapsed ? layout.collapsedRootWidth : compact ? (root ? layout.rootWidth.compact : layout.childWidth.compact) : root ? layout.rootWidth.regular : layout.childWidth.regular;
 
   const style = {
     ...(layout.autoWidth && !collapsed
-      ? {
-          minWidth: layout.minWidth,
-          maxWidth: layout.maxWidth,
-          paddingHorizontal: layout.padding + 2,
-          paddingVertical: layout.paddingVertical,
-        }
-      : {
-          width: fixedWidth,
-          paddingHorizontal: collapsed
-            ? layout.collapsedPadding
-            : layout.padding,
-          paddingVertical: collapsed
-            ? layout.collapsedPadding
-            : layout.paddingVertical,
-        }),
+      ? { minWidth: layout.minWidth, maxWidth: layout.maxWidth, paddingHorizontal: layout.padding + 2, paddingVertical: layout.paddingVertical }
+      : { width: fixedWidth, paddingHorizontal: collapsed ? layout.collapsedPadding : layout.padding, paddingVertical: collapsed ? layout.collapsedPadding : layout.paddingVertical }),
     minHeight: layout.minHeight,
-    flexDirection: layout.autoWidth
-      ? ("row" as const)
-      : collapsed
-        ? ("column" as const)
-        : layout.showChips
-          ? ("row" as const)
-          : ("column" as const),
-    alignItems: layout.autoWidth
-      ? ("center" as const)
-      : collapsed
-        ? ("center" as const)
-        : undefined,
-    justifyContent: collapsed
-      ? ("center" as const)
-      : !layout.autoWidth && !layout.showChips
-        ? ("center" as const)
-        : undefined,
-    gap: collapsed
-      ? layout.collapsedGap
-      : !layout.autoWidth && !layout.showChips
-        ? 3
-        : layout.gap,
+    flexDirection: layout.autoWidth ? ("row" as const) : collapsed ? ("column" as const) : layout.showChips ? ("row" as const) : ("column" as const),
+    alignItems: layout.autoWidth ? ("center" as const) : collapsed ? ("center" as const) : undefined,
+    justifyContent: collapsed ? ("center" as const) : !layout.autoWidth && !layout.showChips ? ("center" as const) : undefined,
+    gap: collapsed ? layout.collapsedGap : !layout.autoWidth && !layout.showChips ? 3 : layout.gap,
     borderWidth: 1,
-    borderStyle:
-      !layout.showChips && node.waiting ? ("dashed" as const) : undefined,
-    borderColor: node.live
-      ? RED
-      : node.delegating
-        ? AMBER
-        : root
-          ? colors.accent
-          : colors.border,
+    borderStyle: !layout.showChips && node.waiting ? ("dashed" as const) : undefined,
+    borderColor: node.live ? k.c.bad : node.delegating ? k.c.warn : root ? withAlpha(k.c.primary, 0.75) : k.c.border,
     borderRadius: layout.borderRadius,
-    backgroundColor: colors.surface1,
-    shadowColor: RED,
-    shadowOpacity: node.live ? layout.glowOpacity : 0,
-    shadowRadius: layout.glowRadius,
-    shadowOffset: { width: 0, height: 0 },
+    backgroundColor: k.c.card,
+    shadowColor: node.live ? k.c.bad : "#000",
+    shadowOpacity: node.live ? layout.glowOpacity : 0.05,
+    shadowRadius: node.live ? layout.glowRadius : 2,
+    shadowOffset: { width: 0, height: node.live ? 0 : 1 },
     // A role with no session yet: dimmed, and nothing to open.
     opacity: node.waiting ? 0.45 : node.kind === "subagent" ? 0.85 : 1,
   };
-  const hideButton = props.dismiss && canDismiss(node) ? (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={props.hideLabel}
-      onPress={(event) => { event.stopPropagation(); props.dismiss?.(node.agent.id); }}
-      style={{ position: "absolute", top: -7, left: -7, width: 16, height: 16, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: colors.surface1, borderWidth: 1, borderColor: colors.border }}
-    >
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12, lineHeight: 14 }}>×</Text>
-    </Pressable>
-  ) : null;
+  const hideButton =
+    props.dismiss && canDismiss(node) ? (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={props.hideLabel}
+        onPress={(event) => {
+          event.stopPropagation();
+          props.dismiss?.(node.agent.id);
+        }}
+        style={{ position: "absolute", top: -7, left: -7, width: 16, height: 16, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: k.c.card, borderWidth: 1, borderColor: k.c.border }}
+      >
+        <Icon name="X" size={10} color={k.c.mutedFg} />
+      </Pressable>
+    ) : null;
   const archiving = props.archive;
   const archiveButton = canArchive(node) ? (
     <>
@@ -592,24 +260,25 @@ function Card(
         accessibilityRole="button"
         accessibilityLabel={archiving.label}
         disabled={archiving.pending}
-        onPress={(event) => { event.stopPropagation(); archiving.run(node.agent.id); }}
-        style={{ position: "absolute", bottom: -8, right: 6, paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4, backgroundColor: colors.surface1, opacity: archiving.pending ? 0.5 : 1 }}
+        onPress={(event) => {
+          event.stopPropagation();
+          archiving.run(node.agent.id);
+        }}
+        style={{ position: "absolute", bottom: -9, right: 6, flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 999, borderWidth: 1, borderColor: k.c.border, backgroundColor: k.c.card, opacity: archiving.pending ? 0.5 : 1 }}
       >
-        <Text style={{ color: colors.foregroundMuted, fontSize: 11, lineHeight: 13, textDecorationLine: "underline" }}>{archiving.label}</Text>
+        <Icon name="Archive" size={10} color={k.c.mutedFg} />
+        <Text style={{ color: k.c.mutedFg, fontSize: 10.5, lineHeight: 13, fontWeight: "500" }}>{archiving.label}</Text>
       </Pressable>
       {archiving.errorId === node.agent.id ? (
-        <Text numberOfLines={1} style={{ position: "absolute", top: "100%", right: 0, marginTop: 6, color: colors.statusDanger, fontSize: 11 }}>{archiving.errorLabel}</Text>
+        <Text numberOfLines={1} style={{ position: "absolute", top: "100%", right: 0, marginTop: 8, color: k.c.bad, fontSize: 11 }}>
+          {archiving.errorLabel}
+        </Text>
       ) : null}
     </>
   ) : null;
   const card =
     open && !node.waiting && node.kind !== "subagent" ? (
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={node.title}
-        onPress={() => open(node.agent.id)}
-        style={style}
-      >
+      <Pressable accessibilityRole="button" accessibilityLabel={node.title} onPress={() => open(node.agent.id)} style={({ pressed }) => [style, pressed ? { opacity: 0.85 } : null]}>
         {content}
         {hideButton}
         {archiveButton}
@@ -632,17 +301,10 @@ function Card(
     );
   }
   const peak = (layout.arrival + 1) / 2;
-  const ping =
-    phase?.interpolate({
-      inputRange: [0, layout.arrival, peak, 1],
-      outputRange: [1, 1, layout.arrivalFlash.scale, 1],
-    }) ?? 1;
-  const flash =
-    phase?.interpolate({
-      inputRange: [0, layout.arrival, peak, 1],
-      outputRange: [0, 0, layout.arrivalFlash.opacity, 0],
-    }) ?? 0;
+  const ping = phase?.interpolate({ inputRange: [0, layout.arrival, peak, 1], outputRange: [1, 1, layout.arrivalFlash.scale, 1] }) ?? 1;
+  const flash = phase?.interpolate({ inputRange: [0, layout.arrival, peak, 1], outputRange: [0, 0, layout.arrivalFlash.opacity, 0] }) ?? 0;
   const flashInset = layout.autoWidth ? -1 : -2;
+  const glowTone = withAlpha(k.c.bad, 0.7);
   const liveCard = (
     <Animated.View style={{ transform: [{ scale: ping }] }}>
       <Animated.View
@@ -655,28 +317,15 @@ function Card(
           right: -1,
           borderRadius: layout.borderRadius,
           borderWidth: 1,
-          borderColor: GLOW,
-          backgroundColor: GLOW,
-          shadowColor: GLOW,
+          borderColor: glowTone,
+          backgroundColor: glowTone,
+          shadowColor: k.c.bad,
           shadowOpacity: layout.arrivalFlash.opacity,
           shadowRadius: Math.max(2, layout.glowRadius * 0.6),
           shadowOffset: { width: 0, height: 0 },
           elevation: 4,
-          opacity: glow.interpolate({
-            inputRange: [0, 1],
-            outputRange: [layout.glowOpacity * 0.32, layout.glowOpacity * 1.28],
-          }),
-          transform: [
-            {
-              scale: glow.interpolate({
-                inputRange: [0, 1],
-                outputRange: [
-                  1,
-                  1 + (layout.arrivalFlash.scale - 1) * (2 / 3),
-                ],
-              }),
-            },
-          ],
+          opacity: glow.interpolate({ inputRange: [0, 1], outputRange: [layout.glowOpacity * 0.32, layout.glowOpacity * 1.28] }),
+          transform: [{ scale: glow.interpolate({ inputRange: [0, 1], outputRange: [1, 1 + (layout.arrivalFlash.scale - 1) * (2 / 3)] }) }],
         }}
       />
       <Animated.View
@@ -688,8 +337,8 @@ function Card(
           left: flashInset,
           right: flashInset,
           borderRadius: layout.borderRadius,
-          backgroundColor: GLOW,
-          shadowColor: GLOW,
+          backgroundColor: glowTone,
+          shadowColor: k.c.bad,
           shadowOpacity: Math.min(1, layout.glowOpacity * 5.6),
           shadowRadius: layout.glowRadius * 1.4,
           elevation: 8,
@@ -709,57 +358,16 @@ function Card(
   );
 }
 
-function Dashes({
-  flow,
-  layout,
-  vertical = false,
-  reverse = false,
-}: {
-  flow: Animated.Value;
-  layout: DashboardDensityLayout;
-  vertical?: boolean;
-  reverse?: boolean;
-}) {
+function Dashes({ k, flow, layout, vertical = false, reverse = false }: { k: Kit; flow: Animated.Value; layout: DashboardDensityLayout; vertical?: boolean; reverse?: boolean }) {
   const [length, setLength] = useState(0);
   const step = layout.dashLength + layout.dashGap;
   const count = Math.ceil(length / step) + 2;
-  const offset = flow.interpolate({
-    inputRange: [0, 1],
-    outputRange: reverse ? [step, 0] : [0, step],
-  });
+  const offset = flow.interpolate({ inputRange: [0, 1], outputRange: reverse ? [step, 0] : [0, step] });
   return (
-    <View
-      pointerEvents="none"
-      onLayout={(event) =>
-        setLength(
-          vertical
-            ? event.nativeEvent.layout.height
-            : event.nativeEvent.layout.width,
-        )
-      }
-      style={{ flex: 1, overflow: "hidden" }}
-    >
-      <Animated.View
-        style={{
-          position: "absolute",
-          flexDirection: vertical ? "column" : "row",
-          ...(vertical ? { top: -step } : { left: -step }),
-          transform: [
-            vertical ? { translateY: offset } : { translateX: offset },
-          ],
-        }}
-      >
+    <View pointerEvents="none" onLayout={(event) => setLength(vertical ? event.nativeEvent.layout.height : event.nativeEvent.layout.width)} style={{ flex: 1, overflow: "hidden" }}>
+      <Animated.View style={{ position: "absolute", flexDirection: vertical ? "column" : "row", ...(vertical ? { top: -step } : { left: -step }), transform: [vertical ? { translateY: offset } : { translateX: offset }] }}>
         {Array.from({ length: count }, (_, i) => (
-          <View
-            key={i}
-            style={{
-              width: vertical ? 2 : layout.dashLength,
-              height: vertical ? layout.dashLength : 2,
-              marginBottom: vertical ? layout.dashGap : 0,
-              marginRight: vertical ? 0 : layout.dashGap,
-              backgroundColor: RED,
-            }}
-          />
+          <View key={i} style={{ width: vertical ? 2 : layout.dashLength, height: vertical ? layout.dashLength : 2, marginBottom: vertical ? layout.dashGap : 0, marginRight: vertical ? 0 : layout.dashGap, borderRadius: 1, backgroundColor: k.c.bad }} />
         ))}
       </Animated.View>
     </View>
@@ -768,72 +376,26 @@ function Dashes({
 
 const TREE_PAD_X = 16;
 
-function treeDepth(
-  node: AgentNode,
-  collapseSubagents: boolean,
-  expandedSubagents: Record<string, boolean>,
-): number {
-  const children =
-    collapseSubagents && !expandedSubagents[node.agent.id]
-      ? node.children.filter((child) => child.kind !== "subagent")
-      : node.children;
+function treeDepth(node: AgentNode, collapseSubagents: boolean, expandedSubagents: Record<string, boolean>): number {
+  const children = collapseSubagents && !expandedSubagents[node.agent.id] ? node.children.filter((child) => child.kind !== "subagent") : node.children;
   if (!children.length) return 0;
-  return (
-    1 +
-    Math.max(
-      ...children.map((child) =>
-        treeDepth(child, collapseSubagents, expandedSubagents),
-      ),
-    )
-  );
+  return 1 + Math.max(...children.map((child) => treeDepth(child, collapseSubagents, expandedSubagents)));
 }
 
-function expandedTreeWidth(
-  node: AgentNode,
-  compact: boolean,
-  layout: DashboardDensityLayout,
-  expandedSubagents: Record<string, boolean>,
-): number {
-  const rootWidth = compact
-    ? layout.rootWidth.compact
-    : layout.rootWidth.regular;
-  const childWidth = compact
-    ? layout.childWidth.compact
-    : layout.childWidth.regular;
-  return (
-    rootWidth +
-    treeDepth(node, layout.collapseSubagents, expandedSubagents) *
-      (layout.stem + layout.branch + childWidth)
-  );
+function expandedTreeWidth(node: AgentNode, compact: boolean, layout: DashboardDensityLayout, expandedSubagents: Record<string, boolean>): number {
+  const rootWidth = compact ? layout.rootWidth.compact : layout.rootWidth.regular;
+  const childWidth = compact ? layout.childWidth.compact : layout.childWidth.regular;
+  return rootWidth + treeDepth(node, layout.collapseSubagents, expandedSubagents) * (layout.stem + layout.branch + childWidth);
 }
 
-function CommandPacket({
-  phase,
-  junction,
-  center,
-  colors,
-  layout,
-}: {
-  phase: Animated.AnimatedModulo<number>;
-  junction: number;
-  center: number;
-  colors: Colors;
-  layout: DashboardDensityLayout;
-}) {
+function CommandPacket({ phase, junction, center, k, layout }: { phase: Phase; junction: number; center: number; k: Kit; layout: DashboardDensityLayout }) {
   const { stem, branch, arrival, signalDotSize, glowRadius } = layout;
   const distance = stem + Math.abs(center - junction) + branch;
   const first = (arrival * stem) / distance;
   const second = (arrival * (stem + Math.abs(center - junction))) / distance;
-  const input =
-    second > first ? [0, first, second, arrival, 1] : [0, first, arrival, 1];
-  const x =
-    second > first
-      ? [0, stem, stem, stem + branch, stem + branch]
-      : [0, stem, stem + branch, stem + branch];
-  const y =
-    second > first
-      ? [junction, junction, center, center, center]
-      : [junction, junction, center, center];
+  const input = second > first ? [0, first, second, arrival, 1] : [0, first, arrival, 1];
+  const x = second > first ? [0, stem, stem, stem + branch, stem + branch] : [0, stem, stem + branch, stem + branch];
+  const y = second > first ? [junction, junction, center, center, center] : [junction, junction, center, center];
   const half = Math.floor(signalDotSize / 2);
   return (
     <Animated.View
@@ -844,83 +406,29 @@ function CommandPacket({
         width: signalDotSize,
         height: signalDotSize,
         borderRadius: Math.ceil(signalDotSize / 2),
-        backgroundColor: colors.foreground,
-        shadowColor: RED,
+        backgroundColor: k.c.fg,
+        shadowColor: k.c.bad,
         shadowOpacity: 1,
         shadowRadius: Math.max(2, Math.round(glowRadius * 0.6)),
         shadowOffset: { width: 0, height: 0 },
         elevation: 5,
-        opacity: phase.interpolate({
-          inputRange: [0, 0.02, arrival, arrival + 0.01, 1],
-          outputRange: [0, 1, 1, 0, 0],
-        }),
-        transform: [
-          {
-            translateX: phase.interpolate({
-              inputRange: input,
-              outputRange: x,
-            }),
-          },
-          {
-            translateY: phase.interpolate({
-              inputRange: input,
-              outputRange: y,
-            }),
-          },
-        ],
+        opacity: phase.interpolate({ inputRange: [0, 0.02, arrival, arrival + 0.01, 1], outputRange: [0, 1, 1, 0, 0] }),
+        transform: [{ translateX: phase.interpolate({ inputRange: input, outputRange: x }) }, { translateY: phase.interpolate({ inputRange: input, outputRange: y }) }],
       }}
     />
   );
 }
 
-function Connector({
-  colors,
-  flow,
-  layout,
-  junction,
-  children,
-  centers,
-  phases,
-}: {
-  colors: Colors;
-  flow: Animated.Value;
-  layout: DashboardDensityLayout;
-  junction: number;
-  children: AgentNode[];
-  centers: Record<string, number>;
-  phases: Record<string, Animated.AnimatedModulo<number>>;
-}) {
+function Connector({ k, flow, layout, junction, children, centers, phases }: { k: Kit; flow: Animated.Value; layout: DashboardDensityLayout; junction: number; children: AgentNode[]; centers: Record<string, number>; phases: Record<string, Phase> }) {
   const { stem, branch } = layout;
-  const positioned = children.filter(
-    (child) => centers[child.agent.id] !== undefined,
-  );
+  const positioned = children.filter((child) => centers[child.agent.id] !== undefined);
   if (!positioned.length) return null;
   const ys = positioned.map((child) => centers[child.agent.id]!);
   const min = Math.min(...ys);
   const max = Math.max(...ys);
   return (
-    <View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        left: 0,
-        top: 0,
-        bottom: 0,
-        width: stem + branch,
-      }}
-    >
-      {max > min && (
-        <View
-          style={{
-            position: "absolute",
-            left: stem,
-            top: min + 8,
-            height: Math.max(0, max - min - 16),
-            borderLeftWidth: 1,
-            borderColor: colors.border,
-          }}
-        />
-      )}
+    <View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: stem + branch }}>
+      {max > min && <View style={{ position: "absolute", left: stem, top: min + 8, height: Math.max(0, max - min - 16), borderLeftWidth: 1, borderColor: k.c.border }} />}
       {positioned.map((child) => {
         const center = centers[child.agent.id]!;
         const delta = center - junction;
@@ -928,28 +436,9 @@ function Connector({
         const radius = Math.min(8, Math.abs(delta));
         const above = delta < 0;
         return (
-          <View
-            key={child.agent.id}
-            style={{
-              position: "absolute",
-              left: stem,
-              top: 0,
-              bottom: 0,
-              width: branch,
-            }}
-          >
+          <View key={child.agent.id} style={{ position: "absolute", left: stem, top: 0, bottom: 0, width: branch }}>
             {straight ? (
-              <View
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  top: center,
-                  borderTopWidth: 1,
-                  borderColor: colors.border,
-                  borderStyle: child.waiting ? "dashed" : "solid",
-                }}
-              />
+              <View style={{ position: "absolute", left: 0, right: 0, top: center, borderTopWidth: 1, borderColor: k.c.border, borderStyle: child.waiting ? "dashed" : "solid" }} />
             ) : (
               <View
                 style={{
@@ -959,39 +448,21 @@ function Connector({
                   top: above ? center : center - radius,
                   height: radius,
                   borderLeftWidth: 1,
-                  borderColor: colors.border,
+                  borderColor: k.c.border,
                   borderStyle: child.waiting ? "dashed" : "solid",
-                  ...(above
-                    ? { borderTopWidth: 1, borderTopLeftRadius: radius }
-                    : { borderBottomWidth: 1, borderBottomLeftRadius: radius }),
+                  ...(above ? { borderTopWidth: 1, borderTopLeftRadius: radius } : { borderBottomWidth: 1, borderBottomLeftRadius: radius }),
                 }}
               />
             )}
             {child.live && (
               <>
                 {Math.abs(delta) > 0 && (
-                  <View
-                    style={{
-                      position: "absolute",
-                      left: 0,
-                      top: Math.min(center, junction),
-                      height: Math.abs(delta),
-                      width: 2,
-                    }}
-                  >
-                    <Dashes flow={flow} layout={layout} vertical reverse={above} />
+                  <View style={{ position: "absolute", left: 0, top: Math.min(center, junction), height: Math.abs(delta), width: 2 }}>
+                    <Dashes k={k} flow={flow} layout={layout} vertical reverse={above} />
                   </View>
                 )}
-                <View
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    right: 0,
-                    top: center,
-                    height: 2,
-                  }}
-                >
-                  <Dashes flow={flow} layout={layout} />
+                <View style={{ position: "absolute", left: 0, right: 0, top: center, height: 2 }}>
+                  <Dashes k={k} flow={flow} layout={layout} />
                 </View>
               </>
             )}
@@ -999,67 +470,32 @@ function Connector({
         );
       })}
       {positioned.some((child) => child.live) && (
-        <View
-          style={{
-            position: "absolute",
-            left: 0,
-            top: junction,
-            width: stem,
-            height: 2,
-          }}
-        >
-          <Dashes flow={flow} layout={layout} />
+        <View style={{ position: "absolute", left: 0, top: junction, width: stem, height: 2 }}>
+          <Dashes k={k} flow={flow} layout={layout} />
         </View>
       )}
       {positioned
         .filter((child) => child.live)
         .map((child) => (
-          <CommandPacket
-            key={child.agent.id}
-            phase={phases[child.agent.id]!}
-            junction={junction}
-            center={centers[child.agent.id]!}
-            colors={colors}
-            layout={layout}
-          />
+          <CommandPacket key={child.agent.id} phase={phases[child.agent.id]!} junction={junction} center={centers[child.agent.id]!} k={k} layout={layout} />
         ))}
     </View>
   );
 }
 
 function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
-  const {
-    node,
-    colors,
-    flow,
-    packet,
-    layout,
-    subagentLabel,
-    expandedSubagents,
-    toggleSubagents,
-  } = props;
-  const subagents = useMemo(
-    () => node.children.filter((child) => child.kind === "subagent"),
-    [node.children],
-  );
+  const { node, k, flow, packet, layout, subagentLabel, expandedSubagents, toggleSubagents } = props;
+  const subagents = useMemo(() => node.children.filter((child) => child.kind === "subagent"), [node.children]);
   const collapseSubagents = layout.collapseSubagents && subagents.length > 0;
   const subagentsExpanded = Boolean(expandedSubagents[node.agent.id]);
-  const visibleChildren = useMemo(
-    () =>
-      collapseSubagents && !subagentsExpanded
-        ? node.children.filter((child) => child.kind !== "subagent")
-        : node.children,
-    [collapseSubagents, subagentsExpanded, node.children],
-  );
+  const visibleChildren = useMemo(() => (collapseSubagents && !subagentsExpanded ? node.children.filter((child) => child.kind !== "subagent") : node.children), [collapseSubagents, subagentsExpanded, node.children]);
   const [height, setHeight] = useState(0);
   const [heights, setHeights] = useState<Record<string, number>>({});
   useEffect(() => {
     const ids = new Set(visibleChildren.map((child) => child.agent.id));
     setHeights((previous) => {
       const entries = Object.entries(previous).filter(([id]) => ids.has(id));
-      return entries.length === Object.keys(previous).length
-        ? previous
-        : Object.fromEntries(entries);
+      return entries.length === Object.keys(previous).length ? previous : Object.fromEntries(entries);
     });
   }, [visibleChildren]);
   const centers: Record<string, number> = {};
@@ -1073,20 +509,10 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
       offset += rowHeight;
     }
   }
-  const childKey = JSON.stringify(
-    visibleChildren.map((child) => child.agent.id),
-  );
+  const childKey = JSON.stringify(visibleChildren.map((child) => child.agent.id));
   const phases = useMemo(() => {
     const ids: string[] = JSON.parse(childKey);
-    return Object.fromEntries(
-      ids.map((id, index) => [
-        id,
-        Animated.modulo(
-          Animated.add(packet, index / Math.max(1, ids.length)),
-          1,
-        ),
-      ]),
-    );
+    return Object.fromEntries(ids.map((id, index) => [id, Animated.modulo(Animated.add(packet, index / Math.max(1, ids.length)), 1)]));
   }, [childKey, packet]);
   const rowPadY = layout.autoWidth ? 3 : layout.showChips ? 6 : 4;
   return (
@@ -1094,59 +520,24 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
       <Card
         {...props}
         subagentCount={collapseSubagents ? subagents.length : 0}
-        subagentCountLabel={
-          collapseSubagents ? subagentLabel(subagents.length) : undefined
-        }
+        subagentCountLabel={collapseSubagents ? subagentLabel(subagents.length) : undefined}
         subagentsExpanded={subagentsExpanded}
-        onToggleSubagents={
-          collapseSubagents ? () => toggleSubagents(node.agent.id) : undefined
-        }
+        onToggleSubagents={collapseSubagents ? () => toggleSubagents(node.agent.id) : undefined}
       />
       {visibleChildren.length > 0 && (
         <View onLayout={(event) => setHeight(event.nativeEvent.layout.height)}>
-          <View
-            pointerEvents="none"
-            style={{
-              position: "absolute",
-              left: 0,
-              top: "50%",
-              width: layout.stem,
-              height: 1,
-              backgroundColor: colors.border,
-            }}
-          />
-          <Connector
-            colors={colors}
-            flow={flow}
-            layout={layout}
-            junction={height / 2}
-            children={visibleChildren}
-            centers={centers}
-            phases={phases}
-          />
+          <View pointerEvents="none" style={{ position: "absolute", left: 0, top: "50%", width: layout.stem, height: 1, backgroundColor: k.c.border }} />
+          <Connector k={k} flow={flow} layout={layout} junction={height / 2} children={visibleChildren} centers={centers} phases={phases} />
           {visibleChildren.map((child) => (
             <View
               key={child.agent.id}
               onLayout={(event) => {
                 const rowHeight = event.nativeEvent.layout.height;
-                setHeights((previous) =>
-                  previous[child.agent.id] === rowHeight
-                    ? previous
-                    : { ...previous, [child.agent.id]: rowHeight },
-                );
+                setHeights((previous) => (previous[child.agent.id] === rowHeight ? previous : { ...previous, [child.agent.id]: rowHeight }));
               }}
-              style={{
-                paddingLeft: layout.stem + layout.branch,
-                paddingVertical: rowPadY,
-              }}
+              style={{ paddingLeft: layout.stem + layout.branch, paddingVertical: rowPadY }}
             >
-              <Tree
-                {...props}
-                root={false}
-                collapseRoot={false}
-                node={child}
-                phase={phases[child.agent.id]}
-              />
+              <Tree {...props} root={false} collapseRoot={false} node={child} phase={phases[child.agent.id]} />
             </View>
           ))}
         </View>
@@ -1156,25 +547,8 @@ function Tree(props: TreeProps & { root?: boolean; collapseRoot?: boolean }) {
 }
 
 function AnimationAnchor({ value }: { value: Animated.Value }) {
-  const opacity = useMemo(
-    () =>
-      value.interpolate({
-        inputRange: [0, 1],
-        outputRange: [0, 0],
-      }),
-    [value],
-  );
-  return (
-    <Animated.View
-      pointerEvents="none"
-      style={{
-        position: "absolute",
-        width: 0,
-        height: 0,
-        opacity,
-      }}
-    />
-  );
+  const opacity = useMemo(() => value.interpolate({ inputRange: [0, 1], outputRange: [0, 0] }), [value]);
+  return <Animated.View pointerEvents="none" style={{ position: "absolute", width: 0, height: 0, opacity }} />;
 }
 
 type DashboardProps = Pick<PluginWorkspacePanelProps, "theme" | "layout" | "navigation" | "workspaceId" | "tab"> & {
@@ -1192,17 +566,31 @@ export function SessionDashboard(props: PluginAgentPanelProps) {
   return <Dashboard {...props} sessionAgentId={props.params.agentId} />;
 }
 
-
-function Chip({ label, selected, colors, onPress, disabled }: { label: string; selected: boolean; colors: Colors; onPress(): void; disabled?: boolean }) {
+/** A session in the scope picker: a pill, highlighted when picked. */
+function ScopeChip({ k, label, on, onPress, icon }: { k: Kit; label: string; on: boolean; onPress(): void; icon?: string }) {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected, disabled }}
-      disabled={disabled}
+      accessibilityState={{ selected: on }}
       onPress={onPress}
-      style={{ paddingHorizontal: 9, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: selected ? colors.accent : colors.border, backgroundColor: selected ? colors.accent : colors.surface1, maxWidth: 200, opacity: disabled && !selected ? 0.4 : 1 }}
+      style={(state) => ({ flexDirection: "row", alignItems: "center", gap: 5, height: 26, maxWidth: 200, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: on ? k.c.primary : k.c.border, backgroundColor: on ? withAlpha(k.c.primary, 0.16) : state.pressed ? k.c.muted : k.c.card })}
     >
-      <Text numberOfLines={1} style={{ color: selected ? colors.accentForeground : colors.foreground, fontSize: 12, fontWeight: selected ? "700" : "500" }}>{label}</Text>
+      {icon ? <Icon name={icon} size={12} color={on ? k.c.primary : k.c.mutedFg} /> : null}
+      <Text numberOfLines={1} style={{ flexShrink: 1, color: k.c.fg, fontSize: 12, fontWeight: on ? "600" : "500" }}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+/** An on/off switch with its label on the left. */
+function Toggle({ k, label, value, onChange }: { k: Kit; label: string; value: boolean; onChange(value: boolean): void }) {
+  return (
+    <Pressable accessibilityRole="switch" accessibilityLabel={label} accessibilityState={{ checked: value }} onPress={() => onChange(!value)} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+      <Text style={{ color: k.c.mutedFg, fontSize: 12, fontWeight: "500" }}>{label}</Text>
+      <View style={{ width: 32, height: 18, borderRadius: 9, justifyContent: "center", paddingHorizontal: 2, backgroundColor: value ? k.c.primary : k.c.muted, borderWidth: 1, borderColor: value ? k.c.primary : k.c.border }}>
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: value ? k.c.primaryFg : k.c.mutedFg, alignSelf: value ? "flex-end" : "flex-start" }} />
+      </View>
     </Pressable>
   );
 }
@@ -1211,6 +599,7 @@ function Dashboard(props: DashboardProps) {
   const paseo = usePaseo();
   const client = useQueryClient();
   const { t } = useTranslation(messages);
+  const k = useKit(props.theme, props.layout.compact);
   const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
   const sessionId = props.sessionAgentId ?? state.session;
   const archived = useMutation({
@@ -1222,52 +611,29 @@ function Dashboard(props: DashboardProps) {
   const glow = useRef(new Animated.Value(0)).current;
   const packet = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    const animation = Animated.loop(
-      Animated.timing(packet, {
-        toValue: 1,
-        duration: 1600,
-        easing: Easing.linear,
-        useNativeDriver: Platform.OS !== "web",
-      }),
-    );
+    const animation = Animated.loop(Animated.timing(packet, { toValue: 1, duration: 1600, easing: Easing.linear, useNativeDriver: Platform.OS !== "web" }));
     animation.start();
     return () => animation.stop();
   }, [packet]);
   useEffect(() => {
     const animation = Animated.loop(
       Animated.sequence([
-        Animated.timing(glow, {
-          toValue: 1,
-          duration: 700,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(glow, {
-          toValue: 0,
-          duration: 700,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
+        Animated.timing(glow, { toValue: 1, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0, duration: 700, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
       ]),
     );
     animation.start();
     return () => animation.stop();
   }, [glow]);
   useEffect(() => {
-    const animation = Animated.loop(
-      Animated.timing(flow, {
-        toValue: 1,
-        duration: 900,
-        useNativeDriver: Platform.OS !== "web",
-      }),
-    );
+    const animation = Animated.loop(Animated.timing(flow, { toValue: 1, duration: 900, useNativeDriver: Platform.OS !== "web" }));
     animation.start();
     return () => animation.stop();
   }, [flow]);
   useEffect(() => {
-    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const timers = new Set<Timer>();
     const coalesce = (fn: () => void) => {
-      let timer: ReturnType<typeof setTimeout> | null = null;
+      let timer: Timer | null = null;
       return () => {
         if (timer !== null) return;
         timer = setTimeout(() => {
@@ -1278,11 +644,7 @@ function Dashboard(props: DashboardProps) {
         timers.add(timer);
       };
     };
-    const invalidate = (key: string) =>
-      void client.invalidateQueries(
-        { queryKey: ["dashboard", key] },
-        { cancelRefetch: false },
-      );
+    const invalidate = (key: string) => void client.invalidateQueries({ queryKey: ["dashboard", key] }, { cancelRefetch: false });
     const refreshAgents = coalesce(() => {
       invalidate("agents");
       invalidate("session");
@@ -1292,18 +654,12 @@ function Dashboard(props: DashboardProps) {
       invalidate("roster");
     });
     const refreshProviders = coalesce(() => invalidate("providers"));
-    const off = [
-      paseo.agents.subscribe(refreshAgents),
-      paseo.workspaces.subscribe(refreshWorkspaces),
-      paseo.projects.subscribe(refreshWorkspaces),
-      paseo.providers.subscribe(refreshProviders),
-    ];
+    const off = [paseo.agents.subscribe(refreshAgents), paseo.workspaces.subscribe(refreshWorkspaces), paseo.projects.subscribe(refreshWorkspaces), paseo.providers.subscribe(refreshProviders)];
     const events = paseo.observeEvents(["agent.provider_subagents.update"]);
     events.subscribe({
       snapshot() {},
       update(message) {
-        if (message.type === "agent.provider_subagents.update")
-          setLive((current) => applySubagentUpdate(current, message.payload));
+        if (message.type === "agent.provider_subagents.update") setLive((current) => applySubagentUpdate(current, message.payload));
       },
     });
     let active = true;
@@ -1338,10 +694,7 @@ function Dashboard(props: DashboardProps) {
   }, [paseo, client]);
   const agents = useQuery({
     queryKey: ["dashboard", "agents", state.showClosed],
-    queryFn: () =>
-      paseo.agents.list(
-        state.showClosed ? { filter: { includeArchived: true } } : {},
-      ),
+    queryFn: () => paseo.agents.list(state.showClosed ? { filter: { includeArchived: true } } : {}),
   });
   const workspaces = useQuery({
     queryKey: ["dashboard", "workspaces"],
@@ -1360,83 +713,46 @@ function Dashboard(props: DashboardProps) {
     const defaults: Record<string, string> = {};
     for (const entry of providers.data?.entries ?? []) {
       for (const model of entry.models ?? []) {
-        if (model.defaultThinkingOptionId) {
-          defaults[`${entry.provider}/${model.id}`] =
-            model.defaultThinkingOptionId;
-        }
+        if (model.defaultThinkingOptionId) defaults[`${entry.provider}/${model.id}`] = model.defaultThinkingOptionId;
       }
     }
     return defaults;
   }, [providers.data]);
   const workspaceIds = useMemo(() => {
     const entries = workspaces.data?.entries ?? [];
-    const projectId = entries.find(
-      (w) => w.id === props.workspaceId,
-    )?.projectId;
-    return projectId
-      ? entries.filter((w) => w.projectId === projectId).map((w) => w.id)
-      : [];
+    const projectId = entries.find((w) => w.id === props.workspaceId)?.projectId;
+    return projectId ? entries.filter((w) => w.projectId === projectId).map((w) => w.id) : [];
   }, [workspaces.data, props.workspaceId]);
   // Sub-agents are read from each scoped agent's timeline, so only the shown session or workspace costs requests.
   const unarchivedIds = useMemo(() => {
     const raw = (agents.data?.entries ?? []).map((entry) => entry.agent);
-    const roots = sessionId
-      ? [sessionRootOf(raw, sessionId)]
-      : raw.filter((agent) => agent.workspaceId === props.workspaceId).map((agent) => agent.id);
-    const scope = new Set<string>();
-    for (const root of roots) for (const id of sessionMembers(raw, root)) scope.add(id);
+    const roots = sessionId ? [sessionRootOf(raw, sessionId)] : raw.filter((agent) => agent.workspaceId === props.workspaceId).map((agent) => agent.id);
+    const scope = new Set(roots.flatMap((root) => [...sessionMembers(raw, root)]));
     const project = new Set(workspaceIds);
-    return raw
-      .filter((agent) => scope.has(agent.id) && project.has(agent.workspaceId ?? "") && !agent.archivedAt)
-      .map((agent) => agent.id);
+    return raw.filter((agent) => scope.has(agent.id) && project.has(agent.workspaceId ?? "") && !agent.archivedAt).map((agent) => agent.id);
   }, [agents.data, workspaceIds, sessionId, props.workspaceId]);
   const subagents = useQuery({
     queryKey: ["dashboard", "subagents", unarchivedIds],
     queryFn: async () => {
       const results = await Promise.allSettled(
         unarchivedIds.map(async (id) => {
-          const page = await paseo.agents
-            .ref(id)
-            .timeline.refetch({ direction: "tail", limit: 200 });
+          const page = await paseo.agents.ref(id).timeline.refetch({ direction: "tail", limit: 200 });
           return subagentsFromTimeline(id, page.entries);
         }),
       );
-      return results.flatMap((result) =>
-        result.status === "fulfilled" ? result.value : [],
-      );
+      return results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
     },
   });
   const allAgents = useMemo(() => {
-    const parentAgents =
-      agents.data?.entries.map((entry) => entry.agent) ?? [];
+    const parentAgents = agents.data?.entries.map((entry) => entry.agent) ?? [];
     const merged = mergeSubagents(subagents.data ?? [], live);
     return [...parentAgents, ...subagentAgents(merged, parentAgents)];
   }, [agents.data, subagents.data, live]);
-  const fullForest = useMemo(
-    () =>
-      buildAgentForest(allAgents, workspaceIds, {
-        ...state,
-        defaultEfforts,
-        roster: roster.data?.teams,
-      }),
-    [allAgents, workspaceIds, state, defaultEfforts, roster.data],
-  );
+  const fullForest = useMemo(() => buildAgentForest(allAgents, workspaceIds, { ...state, defaultEfforts, roster: roster.data?.teams }), [allAgents, workspaceIds, state, defaultEfforts, roster.data]);
   // The workspace's own sessions: trees whose root runs here, with the agents they started anywhere in the project.
-  const workspaceSessions = useMemo(
-    () => workspaceForest(fullForest, props.workspaceId),
-    [fullForest, props.workspaceId],
-  );
-  const forest = useMemo(
-    () =>
-      sessionId
-        ? sessionForest(fullForest, allAgents, sessionId)
-        : workspaceSessions,
-    [fullForest, allAgents, sessionId, workspaceSessions],
-  );
-  const sessionRoot = useMemo(
-    () => (sessionId ? sessionRootOf(allAgents, sessionId) : null),
-    [allAgents, sessionId],
-  );
+  const workspaceSessions = useMemo(() => workspaceForest(fullForest, props.workspaceId), [fullForest, props.workspaceId]);
+  const forest = useMemo(() => (sessionId ? sessionForest(fullForest, allAgents, sessionId) : workspaceSessions), [fullForest, allAgents, sessionId, workspaceSessions]);
+  const sessionRoot = useMemo(() => (sessionId ? sessionRootOf(allAgents, sessionId) : null), [allAgents, sessionId]);
   const readSession = useRpc(teamSessionRpc);
   const session = useQuery({
     queryKey: ["dashboard", "session", sessionRoot],
@@ -1449,62 +765,51 @@ function Dashboard(props: DashboardProps) {
     mutationFn: (mode: TeamMode) => switchMode({ agentId: session.data?.leadAgentId ?? sessionRoot!, mode }),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["dashboard", "session"] }),
   });
-  const rosterModes = useMemo(
-    () => new Map((roster.data?.teams ?? []).map((team) => [team.orchestratorWorkspaceId, team.mode])),
-    [roster.data],
-  );
+  const rosterModes = useMemo(() => new Map((roster.data?.teams ?? []).map((team) => [team.orchestratorWorkspaceId, team.mode])), [roster.data]);
   const closedIds = dismissibleIds(forest);
-  // A team lead's session gets tabs: its overview, its agents, and a page per component of the mode.
+  // A team lead's session gets two tabs: the run's report (with a page per part of the mode) and its agents.
   const teamSession = sessionRoot !== null && !!session.data?.leadAgentId;
+  const detail = useSessionDetail(teamSession ? sessionRoot : null);
+  const [refreshing, setRefreshing] = useState(false);
   const tabMode = session.data?.run?.mode ?? (session.data?.effective === "delegation" || session.data?.locked === "delegation" ? "delegation" : "team");
-  const tab: SessionTab = !teamSession ? "agents" : state.page === "agents" ? "agents" : state.page && (COMPONENT_PAGES as readonly string[]).includes(state.page) ? (state.page as ComponentPage) : "overview";
-  const openPage = (next: SessionTab | null) => setState({ ...state, page: next === "overview" ? null : next });
-  const icons = useMemo(
-    () =>
-      new Map(
-        (providers.data?.entries ?? []).map((p) => [p.provider, p.iconSvg]),
-      ),
-    [providers.data],
-  );
-  const colors = props.theme.colors;
+  const pages = pagesOf(tabMode);
+  const tab: SessionTab = !teamSession ? "agents" : state.page === "agents" ? "agents" : "overview";
+  const part: ComponentPage = state.page && (pages as readonly string[]).includes(state.page) ? (state.page as ComponentPage) : pages[0]!;
+  // Back on the overview, the part that was open before opens again.
+  const lastPart = useRef<ComponentPage | null>(null);
+  if (tab === "overview") lastPart.current = part;
+  const openTab = (next: SessionTab) => setState({ ...state, page: next === "agents" ? "agents" : next === "overview" ? lastPart.current : next });
+  // The overview scrolls to the part's page when it is opened from the diagram and the page is below the fold.
+  const scroller = useRef<ScrollView>(null);
+  const scrollY = useRef(0);
+  const viewport = useRef(0);
+  const pagesY = useRef(0);
+  const openPart = (next: ComponentPage, reveal: boolean) => {
+    setState({ ...state, page: next });
+    if (reveal && pagesY.current - scrollY.current > viewport.current - 160) scroller.current?.scrollTo({ y: Math.max(0, pagesY.current - 8), animated: true });
+  };
+  const refresh = async () => {
+    setRefreshing(true);
+    await Promise.allSettled([client.invalidateQueries({ queryKey: ["dashboard", "session"] }), client.invalidateQueries({ queryKey: ["dashboard", "session-detail"] })]);
+    setRefreshing(false);
+  };
+  const icons = useMemo(() => new Map((providers.data?.entries ?? []).map((p) => [p.provider, p.iconSvg])), [providers.data]);
   const pad = props.layout.compact ? 16 : 24;
   const [panelWidth, setPanelWidth] = useState(0);
-  const [expandedSubagents, setExpandedSubagents] = useState<
-    Record<string, boolean>
-  >({});
-  const toggleSubagents = (id: string) =>
-    setExpandedSubagents((current) => ({ ...current, [id]: !current[id] }));
+  const [expandedSubagents, setExpandedSubagents] = useState<Record<string, boolean>>({});
+  const toggleSubagents = (id: string) => setExpandedSubagents((current) => ({ ...current, [id]: !current[id] }));
   const layout = useMemo(() => densityLayout(state.density), [state.density]);
-  const widestTree = useMemo(
-    () =>
-      forest.trees.reduce(
-        (max, node) =>
-          Math.max(
-            max,
-            expandedTreeWidth(
-              node,
-              props.layout.compact,
-              layout,
-              expandedSubagents,
-            ),
-          ),
-        0,
-      ),
-    [forest.trees, props.layout.compact, layout, expandedSubagents],
-  );
-  const collapseRoot =
-    panelWidth > 0 && widestTree > panelWidth - (pad + TREE_PAD_X) * 2;
+  const widestTree = useMemo(() => forest.trees.reduce((max, node) => Math.max(max, expandedTreeWidth(node, props.layout.compact, layout, expandedSubagents)), 0), [forest.trees, props.layout.compact, layout, expandedSubagents]);
+  const collapseRoot = panelWidth > 0 && widestTree > panelWidth - (pad + TREE_PAD_X) * 2;
   const treeProps = {
-    colors,
+    k,
     compact: props.layout.compact,
     layout,
     icons,
     flow,
     glow,
     packet,
-    open: props.navigation
-      ? (id: string) => props.navigation?.openAgent({ agentId: id })
-      : undefined,
+    open: props.navigation ? (id: string) => props.navigation?.openAgent({ agentId: id }) : undefined,
     caption: (node: AgentNode) =>
       node.role ||
       (node.kind === "orchestrator"
@@ -1525,7 +830,7 @@ function Dashboard(props: DashboardProps) {
       label: t("archiveAgent"),
       errorLabel: t("archiveFailed"),
       pending: archived.isPending,
-      errorId: archived.isError ? archived.variables ?? null : null,
+      errorId: archived.isError ? (archived.variables ?? null) : null,
       run: (id: string) => archived.mutate(id),
     },
     dismiss: state.showClosed ? (id: string) => setState({ ...state, dismissed: state.dismissed.includes(id) ? state.dismissed : [...state.dismissed, id] }) : undefined,
@@ -1535,263 +840,162 @@ function Dashboard(props: DashboardProps) {
   };
   const leadNode = teamSession ? allAgents.find((agent) => agent.id === session.data?.leadAgentId) : undefined;
   const leadStatus = leadNode?.status;
-  const statusColor = leadStatus === "running" ? AMBER : leadStatus === "error" ? RED : leadStatus === "idle" ? colors.statusSuccess : colors.foregroundMuted;
+  const statusTone = leadStatus === "running" ? k.c.warn : leadStatus === "error" ? k.c.bad : leadStatus === "idle" ? k.c.ok : k.c.mutedFg;
+  const runtimes = useMemo(() => Object.fromEntries(allAgents.map((agent) => [agent.id, { provider: agent.provider, model: agent.model ?? null }])), [allAgents]);
+  const run = session.data?.run ?? null;
+  const fullRun = detail.data?.run && run && detail.data.run.id === run.id ? detail.data.run : null;
+  const sessions = [...workspaceSessions.trees, ...workspaceSessions.solo];
+  const modeError = modeSwitch.error ? String(modeSwitch.error) : modeSwitch.data && !modeSwitch.data.ok ? modeSwitch.data.errors.join("; ") : null;
   return (
-    <View style={{ flex: 1, backgroundColor: colors.surface0 }}>
+    <View style={{ flex: 1, backgroundColor: k.c.bg }}>
       <AnimationAnchor value={flow} />
       <AnimationAnchor value={glow} />
       <AnimationAnchor value={packet} />
-      <View style={{ paddingHorizontal: pad, paddingTop: 14, paddingBottom: teamSession ? 0 : 12, gap: 10, borderBottomWidth: teamSession ? 0 : 1, borderColor: colors.border }}>
+      <View style={{ paddingHorizontal: pad, paddingTop: 14, paddingBottom: teamSession ? 0 : 12, gap: 12, borderBottomWidth: teamSession ? 0 : 1, borderColor: k.c.border }}>
         <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, flexShrink: 1, minWidth: 0 }}>
-            <View style={{ width: 30, height: 30, borderRadius: 8, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(colors.accent, 0.16) }}>
-              <Icon name={teamSession ? "Users" : "Network"} size={16} color={colors.accent} />
-            </View>
-            <View style={{ flexShrink: 1, minWidth: 0 }}>
-              <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 16, fontWeight: "700" }}>
+            <Tile k={k} icon={teamSession ? "Users" : "Network"} size={32} />
+            <View style={{ flexShrink: 1, minWidth: 0, gap: 2 }}>
+              <Text numberOfLines={1} style={[k.t.h2, { fontSize: 16 }]}>
                 {props.sessionAgentId ? t("session.title") : t("dashboardTitle")}
               </Text>
               {teamSession ? (
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: statusColor }} />
-                  <Text numberOfLines={1} style={{ color: colors.foregroundMuted, fontSize: 11 }}>
-                    {t("orchestrator")}{leadNode?.model ? ` · ${shortModel(leadNode.model)}` : ""}{session.data?.effective ? ` · ${t(`mode.${session.data.effective}`)}` : ""}{session.data?.locked ? " 🔒" : ""}
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                  <Dot tone={statusTone} live={leadStatus === "running"} size={7} />
+                  <Text numberOfLines={1} style={[k.t.tiny, { flexShrink: 1 }]}>
+                    {t("orchestrator")}
+                    {leadNode?.model ? ` · ${shortModel(leadNode.model)}` : ""}
+                    {session.data?.effective ? ` · ${t(`mode.${session.data.effective}`)}` : ""}
                   </Text>
+                  {session.data?.locked ? <Icon name="Lock" size={11} color={k.c.mutedFg} /> : null}
                 </View>
               ) : null}
             </View>
           </View>
           {tab === "agents" ? (
-            <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", flexShrink: 1, marginLeft: "auto", maxWidth: "100%", gap: 12 }}>
-          <View
-            accessibilityLabel={t("density.label")}
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              backgroundColor: colors.surface1,
-              borderRadius: 7,
-              borderWidth: 1,
-              borderColor: colors.border,
-              padding: 2,
-              gap: 2,
-            }}
-          >
-            {DASHBOARD_DENSITIES.map((option) => {
-              const selected = state.density === option;
-              const label = t(`density.${option}`);
-              return (
-                <Pressable
-                  key={option}
-                  accessibilityRole="button"
-                  accessibilityLabel={`${t("density.label")}: ${label}`}
-                  accessibilityState={{ selected }}
-                  onPress={() => setState({ ...state, density: option })}
-                  style={{
-                    paddingHorizontal: 8,
-                    paddingVertical: 3,
-                    borderRadius: 5,
-                    backgroundColor: selected ? colors.accent : "transparent",
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: selected
-                        ? colors.accentForeground
-                        : colors.foregroundMuted,
-                      fontSize: 11,
-                      fontWeight: selected ? "700" : "500",
-                    }}
-                  >
-                    {label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
+            <View accessibilityLabel={t("density.label")} style={{ marginLeft: "auto" }}>
+              <Segmented k={k} value={state.density} options={DASHBOARD_DENSITIES.map((option) => ({ value: option, label: t(`density.${option}`) }))} onChange={(density) => setState({ ...state, density })} />
             </View>
           ) : null}
         </View>
-      {!props.sessionAgentId && (state.session !== null || [...workspaceSessions.trees, ...workspaceSessions.solo].length > 1) ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6, paddingTop: 0 }}>
-          <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginRight: 2 }}>{t("session.scopeLabel")}</Text>
-          <Chip label={t("session.allSessions")} selected={state.session === null} colors={colors} onPress={() => setState({ ...state, session: null, page: null })} />
-          {[...workspaceSessions.trees, ...workspaceSessions.solo].map((node) => (
-            <Chip key={node.agent.id} label={node.role || node.title} selected={state.session === node.agent.id} colors={colors} onPress={() => setState({ ...state, session: node.agent.id, page: null })} />
-          ))}
-        </View>
-      ) : null}
-        {teamSession ? <SessionTabs mode={tabMode} tab={tab} run={session.data?.run ?? null} pending={!!session.data?.pendingBrief} colors={colors} t={t} onOpen={openPage} /> : null}
+        {!props.sessionAgentId && (state.session !== null || sessions.length > 1) ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <Text style={[k.t.label, { marginRight: 2 }]}>{t("session.scopeLabel")}</Text>
+            <ScopeChip k={k} label={t("session.allSessions")} on={state.session === null} icon="Layers" onPress={() => setState({ ...state, session: null, page: null })} />
+            {sessions.map((node) => (
+              <ScopeChip key={node.agent.id} k={k} label={node.role || node.title} on={state.session === node.agent.id} icon={node.kind === "orchestrator" ? "Users" : "Bot"} onPress={() => setState({ ...state, session: node.agent.id, page: null })} />
+            ))}
+          </View>
+        ) : null}
+        {teamSession ? <SessionTabs mode={tabMode} tab={tab} run={run} pending={!!session.data?.pendingBrief} colors={props.theme.colors} theme={props.theme} compact={props.layout.compact} t={t} parts={false} onOpen={openTab} /> : null}
       </View>
       {tab === "agents" ? (
-        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", paddingHorizontal: pad, paddingTop: 12, gap: 12 }}>
-          <Pressable
-            accessibilityRole="switch"
-            accessibilityState={{ checked: state.showClosed }}
-            onPress={() => setState({ ...state, showClosed: !state.showClosed })}
-            style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-          >
-            <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>
-              {t("showClosed")}
-            </Text>
-            <View
-              style={{
-                width: 32,
-                height: 18,
-                borderRadius: 9,
-                backgroundColor: state.showClosed
-                  ? colors.accent
-                  : colors.surface2,
-                justifyContent: "center",
-                paddingHorizontal: 2,
-              }}
-            >
-              <View
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: 7,
-                  backgroundColor: state.showClosed
-                    ? colors.accentForeground
-                    : colors.foregroundMuted,
-                  alignSelf: state.showClosed ? "flex-end" : "flex-start",
-                }}
-              />
-            </View>
-          </Pressable>
-          {state.showClosed && state.dismissed.length > 0 ? (
-            <Pressable accessibilityRole="button" onPress={() => setState({ ...state, dismissed: [] })} style={{ paddingHorizontal: 8, paddingVertical: 4 }}>
-              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("restoreHidden", { count: state.dismissed.length })}</Text>
-            </Pressable>
-          ) : null}
-          {state.showClosed && closedIds.length > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setState({ ...state, dismissed: [...new Set([...state.dismissed, ...closedIds])] })}
-              style={{ paddingHorizontal: 8, paddingVertical: 4 }}
-            >
-              <Text style={{ color: colors.foregroundMuted, fontSize: 12 }}>{t("hideAllClosed", { count: closedIds.length })}</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      ) : null}
-      {tab === "overview" ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad, gap: 14 }}>
-      {session.data?.leadAgentId && session.data.configured && session.data.effective ? (
-        <View style={{ gap: 4 }}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-            <Text style={{ color: colors.foregroundMuted, fontSize: 12, marginRight: 2 }}>{t("mode.label")}</Text>
-            {TEAM_MODES.map((mode) => (
-              <Chip key={mode} label={t(`mode.${mode}`)} selected={session.data?.effective === mode} disabled={session.data?.locked != null} colors={colors} onPress={() => { if (!modeSwitch.isPending && !session.data?.locked) modeSwitch.mutate(mode); }} />
-            ))}
-            {session.data.locked ? <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>🔒</Text> : session.data.override === null ? <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{t("mode.fromFile")}</Text> : null}
+        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "flex-end", alignItems: "center", paddingHorizontal: pad, paddingTop: 12, gap: 8 }}>
+          {state.showClosed && state.dismissed.length > 0 ? <Button k={k} size="sm" variant="ghost" icon="Eye" label={t("restoreHidden", { count: state.dismissed.length })} onPress={() => setState({ ...state, dismissed: [] })} /> : null}
+          {state.showClosed && closedIds.length > 0 ? <Button k={k} size="sm" variant="ghost" icon="EyeOff" label={t("hideAllClosed", { count: closedIds.length })} onPress={() => setState({ ...state, dismissed: [...new Set([...state.dismissed, ...closedIds])] })} /> : null}
+          <View style={{ marginLeft: 4 }}>
+            <Toggle k={k} label={t("showClosed")} value={state.showClosed} onChange={(showClosed) => setState({ ...state, showClosed })} />
           </View>
-          <Text style={{ color: colors.foregroundMuted, fontSize: 11 }}>{session.data.locked ? t("mode.lockedHint", { mode: t(`mode.${session.data.locked}`) }) : t(`mode.${session.data.effective}Hint`)}</Text>
-          {modeSwitch.error || (modeSwitch.data && !modeSwitch.data.ok) ? (
-            <Text style={{ color: colors.statusDanger, fontSize: 11 }}>{t("mode.switchFailed", { error: modeSwitch.error ? String(modeSwitch.error) : modeSwitch.data && !modeSwitch.data.ok ? modeSwitch.data.errors.join("; ") : "" })}</Text>
-          ) : null}
         </View>
       ) : null}
-          {session.data?.run || session.data?.pendingBrief ? (
-            <RunOverview
-              run={session.data.run}
-              roles={session.data.roles}
-              pending={session.data.pendingBrief}
-              leadAgentId={session.data.leadAgentId}
-              colors={colors}
-              t={t}
-              openAgent={treeProps.open}
-              onOpen={openPage}
-              width={undefined}
-            />
-          ) : (
-            <View style={{ alignItems: "center", gap: 8, paddingVertical: 32 }}>
-              <Icon name="Users" size={28} color={colors.foregroundMuted} />
-              <Text style={{ color: colors.foregroundMuted, fontSize: 12, textAlign: "center" }}>{t("session.noRun")}</Text>
-            </View>
-          )}
-        </ScrollView>
-      ) : tab !== "agents" && sessionRoot ? (
-        <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: pad }}>
-          <ComponentDetail page={tab} sessionAgentId={sessionRoot} colors={colors} t={t} />
-        </ScrollView>
-      ) : (
-      <ScrollView
-        horizontal
-        style={{ flex: 1 }}
-        contentContainerStyle={{ flexGrow: 1 }}
-        onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)}
-      >
+      {tab === "overview" && sessionRoot ? (
         <ScrollView
-          style={{ flexGrow: 1, flexShrink: 0 }}
-          contentContainerStyle={{
-            padding: pad,
-            gap: 24,
+          ref={scroller}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ padding: pad, gap: 16 }}
+          scrollEventThrottle={64}
+          onScroll={(event) => {
+            scrollY.current = event.nativeEvent.contentOffset.y;
+          }}
+          onLayout={(event) => {
+            viewport.current = event.nativeEvent.layout.height;
           }}
         >
-          {agents.isLoading || workspaces.isLoading ? (
-            <Loading />
-          ) : agents.error || workspaces.error ? (
-            <Text style={{ color: colors.statusDanger }}>
-              {t("dashboardError")}
-            </Text>
-          ) : !forest.trees.length && !forest.solo.length ? (
-            <Text style={{ color: colors.foregroundMuted }}>
-              {sessionId ? t("emptySession") : t("emptyWorkspace")}
-            </Text>
-          ) : (
+          {session.data?.leadAgentId && session.data.configured && session.data.effective ? (
+            <ModeSwitch k={k} t={t} effective={session.data.effective} locked={session.data.locked} override={session.data.override} busy={modeSwitch.isPending} error={modeError} onSwitch={(mode) => modeSwitch.mutate(mode)} />
+          ) : null}
+          {run || session.data?.pendingBrief ? (
             <>
+              <RunOverview
+                run={run}
+                roles={session.data?.roles ?? []}
+                pending={session.data?.pendingBrief ?? null}
+                leadAgentId={session.data?.leadAgentId ?? null}
+                colors={props.theme.colors}
+                theme={props.theme}
+                compact={props.layout.compact}
+                width={undefined}
+                t={t}
+                openAgent={treeProps.open}
+                onOpen={(next) => openPart(next, true)}
+                detail={fullRun}
+                page={part}
+                leadStatus={leadStatus ?? null}
+                language={leadNode ? (agentLanguage(leadNode) ?? "en") : null}
+                runtimes={runtimes}
+                updatedAt={Math.max(session.dataUpdatedAt, detail.dataUpdatedAt) || undefined}
+                refreshing={refreshing}
+                onRefresh={() => void refresh()}
+              />
               <View
-                style={{
-                  paddingHorizontal: TREE_PAD_X,
-                  paddingVertical: 12,
-                  gap: 26,
-                  alignItems: "flex-start",
+                onLayout={(event) => {
+                  pagesY.current = event.nativeEvent.layout.y;
                 }}
+                style={{ gap: 14, marginTop: 4 }}
               >
-                {forest.trees.map((node) => (
-                  <Tree
-                    key={node.agent.id}
-                    {...treeProps}
-                    node={node}
-                    root
-                    collapseRoot={collapseRoot}
-                  />
-                ))}
+                <PartTabs mode={tabMode} page={part} events={fullRun?.events ?? run?.events ?? []} pending={!!session.data?.pendingBrief} colors={props.theme.colors} theme={props.theme} compact={props.layout.compact} t={t} onOpen={(next) => openPart(next, false)} />
+                <ComponentDetail page={(COMPONENT_PAGES as readonly string[]).includes(part) ? part : "flow"} sessionAgentId={sessionRoot} colors={props.theme.colors} theme={props.theme} compact={props.layout.compact} t={t} openAgent={treeProps.open} />
               </View>
-              {forest.solo.length > 0 && (
-                <View
-                  style={{
-                    gap: 12,
-                    width:
-                      panelWidth > 0
-                        ? Math.max(0, panelWidth - pad * 2)
-                        : undefined,
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: colors.foregroundMuted,
-                      fontSize: 11,
-                      fontWeight: "700",
-                      textTransform: "uppercase",
-                      letterSpacing: 1,
-                    }}
-                  >
-                    {t("soloAgents")}
-                  </Text>
-                  <View
-                    style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}
-                  >
-                    {forest.solo.map((node) => (
-                      <Card key={node.agent.id} {...treeProps} node={node} />
-                    ))}
-                  </View>
-                </View>
-              )}
             </>
+          ) : session.isLoading ? (
+            <View style={{ alignItems: "center", paddingVertical: 32 }}>
+              <Spinner k={k} />
+            </View>
+          ) : (
+            <Empty k={k} icon="Users">
+              {t("session.noRun")}
+            </Empty>
           )}
         </ScrollView>
-      </ScrollView>
+      ) : (
+        <ScrollView horizontal style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }} onLayout={(event) => setPanelWidth(event.nativeEvent.layout.width)}>
+          <ScrollView style={{ flexGrow: 1, flexShrink: 0 }} contentContainerStyle={{ padding: pad, gap: 24 }}>
+            {agents.isLoading || workspaces.isLoading ? (
+              <View style={{ alignItems: "center", paddingVertical: 32 }}>
+                <Spinner k={k} />
+              </View>
+            ) : agents.error || workspaces.error ? (
+              <Callout k={k} tone={k.c.bad} icon="TriangleAlert">
+                <Text style={{ color: k.c.bad, fontSize: 12 }}>{t("dashboardError")}</Text>
+              </Callout>
+            ) : !forest.trees.length && !forest.solo.length ? (
+              <Empty k={k} icon="Network">
+                {sessionId ? t("emptySession") : t("emptyWorkspace")}
+              </Empty>
+            ) : (
+              <>
+                <View style={{ paddingHorizontal: TREE_PAD_X, paddingVertical: 12, gap: 26, alignItems: "flex-start" }}>
+                  {forest.trees.map((node) => (
+                    <Tree key={node.agent.id} {...treeProps} node={node} root collapseRoot={collapseRoot} />
+                  ))}
+                </View>
+                {forest.solo.length > 0 && (
+                  <View style={{ gap: 12, width: panelWidth > 0 ? Math.max(0, panelWidth - pad * 2) : undefined }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Icon name="Bot" size={13} color={k.c.mutedFg} />
+                      <Text style={k.t.label}>{t("soloAgents")}</Text>
+                    </View>
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10 }}>
+                      {forest.solo.map((node) => (
+                        <Card key={node.agent.id} {...treeProps} node={node} />
+                      ))}
+                    </View>
+                  </View>
+                )}
+              </>
+            )}
+          </ScrollView>
+        </ScrollView>
       )}
     </View>
   );
