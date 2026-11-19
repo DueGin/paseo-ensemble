@@ -9,7 +9,14 @@
       "description": "Paseo 里的智能体团队：协调器和成员各用自己的 provider 与模型，按团队（共享黑板）或委派模式协作，实时展示数据流"
     }
   },
-  "media": [],
+  "media": [
+    "docs/images/hero-en.png",
+    "docs/images/team-editor-en.png",
+    "docs/images/side-panel-en.png",
+    "docs/images/session-overview-en.png",
+    "docs/images/delegation-cards-en.png",
+    "docs/images/teams-screen-en.png"
+  ],
   "requirements": {
     "paseo": ">=0.16.0"
   }
