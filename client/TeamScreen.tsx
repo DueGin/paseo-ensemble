@@ -1,5 +1,6 @@
-// The Agent teams screen: every project's teams (open, reconnect, delete) and the global presets every project can start
-// from (create, edit, rename, copy into a project, delete, start a task). `params.project` opens a new team for that project.
+// The Agent teams screen: the teams of every project that has one (open, reconnect, delete), New team (a form that picks
+// the project and the workspace the team goes to), and the global presets every project can start from (create, edit,
+// rename, copy into a project, delete, start a task). `params.project` opens New team on that project.
 import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginSidebarItemProps } from "@getpaseo/plugin/client";
 import { useRpc, useTranslation } from "@getpaseo/plugin/client";
@@ -10,9 +11,9 @@ import { ScrollView, View } from "react-native";
 import { withAlpha } from "../shared/color";
 import { teamDeleteRpc, teamReconnectRpc, teamRestoreRpc } from "../shared/rpc";
 import { messages } from "./i18n";
-import { Badge, Button, Callout, Card, Chip, Empty, MODE_LOOK, SectionHeader, Spinner, StatTile, T, Tile, useKit, type Kit } from "./kit";
+import { Badge, Button, Callout, Card, Chip, Empty, Field, MODE_LOOK, SectionHeader, Spinner, StatTile, T, Tile, useKit, type Kit } from "./kit";
 import { PresetsSection, StartFromPresetDialog, usePresets } from "./Presets";
-import { PROJECTS_KEY, runtimeText, TEAM_KEY, useProjectTeams, type ProjectTeam, type ProjectTeams } from "./side/data";
+import { freeWorkspaces, PROJECTS_KEY, projectsWithTeams, runtimeText, TEAM_KEY, useProjectTeams, type ProjectTeam, type ProjectTeams } from "./side/data";
 import { LANGUAGE_NAMES } from "./side/preset-card";
 import type { Translate } from "./side/run-parts";
 import { TeamEditor } from "./TeamPanel";
@@ -21,6 +22,9 @@ export const SCREEN_ID = "team";
 
 type RestoreRpc = typeof teamRestoreRpc;
 type Restored = Extract<RpcOutput<RestoreRpc>, { ok: true }>;
+
+/** Where a new team goes: a project, and one of its workspaces without a team, or null for a new workspace. */
+type NewTeam = { projectId: string; workspaceId: string | null };
 
 export function TeamSidebarItem({ currentScreen, openScreen }: PluginSidebarItemProps) {
   const { t } = useTranslation(messages);
@@ -43,8 +47,7 @@ interface TeamActions {
 function TeamRow({ k, t, project, team, actions, openTeamPanel }: { k: Kit; t: Translate; project: ProjectTeams; team: ProjectTeam; actions: TeamActions; openTeamPanel?: (workspaceId: string) => void }) {
   const look = MODE_LOOK[team.mode];
   const key = `${project.id}:${team.file}`;
-  const occupied = new Set(project.teams.map((entry) => entry.workspaceId).filter((id) => id != null));
-  const free = project.workspaces.filter((workspace) => !occupied.has(workspace.id));
+  const free = freeWorkspaces(project);
   const problems = actions.restoreProblem(project.id, team.file);
   return (
     <Card k={k} tone={team.workspaceId ? look.tone : k.c.warn} style={{ gap: 8, padding: 10 }}>
@@ -165,7 +168,32 @@ function ProjectCard({ k, t, project, presets, actions, openTeamPanel, onNewTeam
   );
 }
 
-/** Browse every project's agent teams, open an existing team's panel, or create a new team. */
+/** New team's first fields: the project, then a workspace of it without a team, or a new one made when the team starts. */
+function WhereFields({ k, t, projects, value, onChange }: { k: Kit; t: Translate; projects: readonly ProjectTeams[]; value: NewTeam; onChange(value: NewTeam): void }) {
+  const project = projects.find((entry) => entry.id === value.projectId);
+  const free = project ? freeWorkspaces(project) : [];
+  return (
+    <View style={{ gap: 12 }}>
+      <Field k={k} label={t("screen.project")}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          {projects.map((entry) => (
+            <Chip key={entry.id} k={k} icon="FolderOpen" label={entry.name} on={entry.id === value.projectId} onPress={() => onChange({ projectId: entry.id, workspaceId: null })} />
+          ))}
+        </View>
+      </Field>
+      <Field k={k} label={t("screen.workspace")} hint={t("screen.workspaceHint")}>
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+          <Chip k={k} icon="Plus" label={t("presets.newWorkspace")} on={value.workspaceId === null} onPress={() => onChange({ ...value, workspaceId: null })} />
+          {free.map((workspace) => (
+            <Chip key={workspace.id} k={k} icon="Folder" label={workspace.title} on={workspace.id === value.workspaceId} onPress={() => onChange({ ...value, workspaceId: workspace.id })} />
+          ))}
+        </View>
+      </Field>
+    </View>
+  );
+}
+
+/** Browse the agent teams of every project that has one, open a team's panel, or create a team for a project or workspace. */
 export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }: PluginScreenProps & { openTeamPanel?: (workspaceId: string) => void }) {
   const k = useKit(theme, layout.compact);
   const { t, locale } = useTranslation(messages);
@@ -173,10 +201,10 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
   const [listWidth, setListWidth] = useState(0);
   const columns = layout.compact || listWidth < 720 ? 1 : listWidth < 1120 ? 2 : 3;
   const toast = useToast();
-  // The project a new team is being made for; the side panel opens the screen with `params.project`.
-  const [projectId, setProjectId] = useState((params?.project ?? null) as string | null);
+  // Where the new team being made goes, or null for the list; the side panel opens the screen with `params.project`.
+  const [creating, setCreating] = useState(params?.project ? ({ projectId: params.project, workspaceId: null } as NewTeam) : null);
   useEffect(() => {
-    if (params?.project) setProjectId(params.project);
+    if (params?.project) setCreating({ projectId: params.project, workspaceId: null });
   }, [params?.project]);
   const queryClient = useQueryClient();
   const remove = useRpc(teamDeleteRpc);
@@ -246,24 +274,34 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
   };
 
   const pad = layout.compact ? 12 : 24;
-  if (projectId) {
-    const project = projects.data?.find((entry) => entry.id === projectId);
+  // Every project can get a new team; the list shows only those that have one.
+  const all = projects.data ?? [];
+  if (creating) {
+    const project = all.find((entry) => entry.id === creating.projectId);
+    const workspace = creating.workspaceId ? project?.workspaces.find((entry) => entry.id === creating.workspaceId) : null;
     return (
       <View style={{ flex: 1, backgroundColor: k.c.bg }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: pad, paddingTop: pad, paddingBottom: 4 }}>
-          <Button k={k} variant="ghost" icon="ArrowLeft" label={t("screen.back")} onPress={() => setProjectId(null)} />
+          <Button k={k} variant="ghost" icon="ArrowLeft" label={t("screen.back")} onPress={() => setCreating(null)} />
           {project ? (
             <T k={k} v="muted" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
-              {project.name}
+              {`${project.name} · ${workspace?.title ?? t("presets.newWorkspace")}`}
             </T>
           ) : null}
         </View>
-        <TeamEditor theme={theme} layout={layout} navigation={navigation} target={{ projectId }} onApplied={openApplied} />
+        <TeamEditor
+          theme={theme}
+          layout={layout}
+          navigation={navigation}
+          target={creating.workspaceId ? { workspaceId: creating.workspaceId } : { projectId: creating.projectId }}
+          onApplied={openApplied}
+          where={<WhereFields k={k} t={t} projects={all} value={creating} onChange={setCreating} />}
+        />
       </View>
     );
   }
 
-  const list = projects.data ?? [];
+  const list = projectsWithTeams(all);
   const teamCount = list.reduce((sum, project) => sum + project.teams.length, 0);
   const missing = list.reduce((sum, project) => sum + project.teams.filter((team) => !team.workspaceId).length, 0);
   const rows: ProjectTeams[][] = [];
@@ -285,11 +323,11 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
         <StatTile k={k} label={t("sideUi.screen.presets")} value={presetSettings.status === "ready" ? String(presets.length) : "–"} />
       </View>
 
-      <PresetsSection colors={theme.colors} compact={layout.compact} projects={list} />
+      <PresetsSection colors={theme.colors} compact={layout.compact} projects={all} />
       <StartFromPresetDialog
         colors={theme.colors}
         compact={layout.compact}
-        project={list.find((project) => project.id === startingFor) ?? null}
+        project={all.find((project) => project.id === startingFor) ?? null}
         presets={presets}
         onClose={() => setStartingFor(null)}
         onStarted={(result) => {
@@ -301,7 +339,14 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
       />
 
       <View style={{ gap: 12 }}>
-        <SectionHeader k={k} icon="FolderOpen" title={t("sideUi.screen.projects")} subtitle={t("sideUi.screen.projectsHint")} count={projects.data ? list.length : undefined} />
+        <SectionHeader
+          k={k}
+          icon="FolderOpen"
+          title={t("sideUi.screen.projects")}
+          subtitle={t("sideUi.screen.projectsHint")}
+          count={projects.data ? list.length : undefined}
+          right={<Button k={k} variant="primary" icon="Plus" label={t("screen.newTeam")} size="sm" disabled={!all.length} onPress={() => setCreating({ projectId: all[0]!.id, workspaceId: null })} />}
+        />
         {projects.isLoading ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
             <Spinner k={k} />
@@ -313,7 +358,7 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
             <T k={k} v="small">{String(projects.error)}</T>
           </Callout>
         ) : null}
-        {projects.data && !list.length ? <Empty k={k} icon="Folder">{t("sideUi.screen.noProjects")}</Empty> : null}
+        {projects.data && !list.length ? <Empty k={k} icon={all.length ? "Users" : "Folder"}>{t(all.length ? "screen.empty" : "sideUi.screen.noProjects")}</Empty> : null}
         <View
           style={{ gap: 12 }}
           onLayout={(event) => {
@@ -324,7 +369,7 @@ export function TeamScreen({ theme, layout, navigation, params, openTeamPanel }:
           {rows.map((row) => (
             <View key={row[0]!.id} style={{ flexDirection: "row", alignItems: "flex-start", gap: 12 }}>
               {row.map((project) => (
-                <ProjectCard key={project.id} k={k} t={t} project={project} presets={presets.length} actions={actions} openTeamPanel={openTeamPanel} onNewTeam={() => setProjectId(project.id)} onStartFromPreset={() => setStartingFor(project.id)} />
+                <ProjectCard key={project.id} k={k} t={t} project={project} presets={presets.length} actions={actions} openTeamPanel={openTeamPanel} onNewTeam={() => setCreating({ projectId: project.id, workspaceId: null })} onStartFromPreset={() => setStartingFor(project.id)} />
               ))}
               {Array.from({ length: columns - row.length }, (_, index) => (
                 <View key={`spacer-${index}`} style={{ flex: 1, minWidth: 0 }} />

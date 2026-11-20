@@ -61,7 +61,7 @@ export const en = {
   },
   screen: {
     projects: "Projects",
-    projectsHint: "Each project keeps its teams in .agents/teams/, one per workspace. Open a team to edit it or start its lead.",
+    projectsHint: "Projects that have teams. Each keeps them in .agents/teams/, one per workspace; open a team to edit it or start its lead.",
     teams: "Teams",
     presets: "Presets",
     missing_one: "{{count}} needs reconnecting",
@@ -131,7 +131,7 @@ export const ko: Shape<typeof en> = {
   },
   screen: {
     projects: "프로젝트",
-    projectsHint: "프로젝트마다 팀을 .agents/teams/에 워크스페이스당 하나씩 둡니다. 팀을 열어 편집하거나 리드를 시작하세요.",
+    projectsHint: "팀이 있는 프로젝트입니다. 팀은 .agents/teams/에 워크스페이스당 하나씩 저장되며, 팀을 열어 편집하거나 리드를 시작할 수 있습니다.",
     teams: "팀",
     presets: "프리셋",
     missing_one: "{{count}}개 다시 연결 필요",
@@ -201,7 +201,7 @@ export const ja: Shape<typeof en> = {
   },
   screen: {
     projects: "プロジェクト",
-    projectsHint: "各プロジェクトはチームを .agents/teams/ にワークスペースごとに 1 つずつ保存します。チームを開いて編集したり、リードを開始したりできます。",
+    projectsHint: "チームのあるプロジェクトです。チームは .agents/teams/ にワークスペースごとに 1 つずつ保存されます。チームを開いて編集したり、リードを開始したりできます。",
     teams: "チーム",
     presets: "プリセット",
     missing_one: "{{count}} 件の再接続が必要",
@@ -271,7 +271,7 @@ export const zh: Shape<typeof en> = {
   },
   screen: {
     projects: "项目",
-    projectsHint: "每个项目把团队保存在 .agents/teams/ 里，每个工作区一个。打开团队可以编辑它或启动协调器。",
+    projectsHint: "这里列出有团队的项目。团队保存在项目的 .agents/teams/ 里，每个工作区一个；打开团队可以编辑它或启动协调器。",
     teams: "团队",
     presets: "预设",
     missing_one: "{{count}} 个需要重新连接",

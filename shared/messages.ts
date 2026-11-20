@@ -45,6 +45,10 @@ export const en = {
     reconnectPick: "Pick the workspace this team now runs in",
     startNewWorkspace: "Start in a new workspace",
     noWorkspaceToPick: "This project has no workspace to pick.",
+    empty: "No project has a team yet. Use New team to make one for a project or one of its workspaces.",
+    project: "Project",
+    workspace: "Workspace",
+    workspaceHint: "The lead runs in the workspace you pick, or in a new one made when the team starts. Workspaces that already have a team aren't listed.",
   },
   current: {
     orchestrator: "Orchestrator: {{workspace}} · {{model}}",
@@ -418,6 +422,10 @@ export const ko: Shape<typeof en> = {
     reconnectPick: "이 팀이 이제 쓰는 워크스페이스를 고르세요",
     startNewWorkspace: "새 워크스페이스에서 시작",
     noWorkspaceToPick: "이 프로젝트에는 선택할 워크스페이스가 없습니다.",
+    empty: "아직 팀이 있는 프로젝트가 없습니다. 새 팀으로 프로젝트나 그 워크스페이스에 팀을 만드세요.",
+    project: "프로젝트",
+    workspace: "워크스페이스",
+    workspaceHint: "리드는 고른 워크스페이스에서 실행되며, 새 워크스페이스를 고르면 팀을 시작할 때 만들어집니다. 이미 팀이 있는 워크스페이스는 목록에 없습니다.",
   },
   current: {
     orchestrator: "오케스트레이터: {{workspace}} · {{model}}",
@@ -789,6 +797,10 @@ export const ja: Shape<typeof en> = {
     reconnectPick: "このチームが現在使用しているワークスペースを選んでください",
     startNewWorkspace: "新しいワークスペースで開始",
     noWorkspaceToPick: "このプロジェクトには選択できるワークスペースがありません。",
+    empty: "チームのあるプロジェクトはまだありません。新しいチームから、プロジェクトかそのワークスペースにチームを作成してください。",
+    project: "プロジェクト",
+    workspace: "ワークスペース",
+    workspaceHint: "リードは選んだワークスペースで動きます。新しいワークスペースを選ぶと、チームの開始時に作成されます。すでにチームのあるワークスペースは一覧にありません。",
   },
   current: {
     orchestrator: "オーケストレーター: {{workspace}} · {{model}}",
@@ -1160,6 +1172,10 @@ export const zh: Shape<typeof en> = {
     reconnectPick: "请选择此团队当前使用的工作区",
     startNewWorkspace: "在新工作区中启动",
     noWorkspaceToPick: "此项目没有可选的工作区。",
+    empty: "还没有项目建过团队。点「新建团队」，为某个项目或它的工作区创建团队。",
+    project: "项目",
+    workspace: "工作区",
+    workspaceHint: "协调器在所选工作区里运行；选「新建工作区」则在启动团队时创建。已有团队的工作区不在列表里。",
   },
   current: {
     orchestrator: "协调器：{{workspace}} · {{model}}",

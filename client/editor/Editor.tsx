@@ -6,7 +6,7 @@ import type { RpcOutput } from "@getpaseo/plugin";
 import type { PluginScreenProps, PluginTab } from "@getpaseo/plugin/client";
 import { usePaseo, useRpc, useSettings } from "@getpaseo/plugin/client";
 import { Modal, useToast } from "@getpaseo/plugin/client/ui";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ScrollView, Text, View, type LayoutChangeEvent, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { freeWorkspace, withFreeWorkspaces } from "../../shared/apply-plan";
@@ -39,6 +39,11 @@ export type TeamEditorProps = Pick<PluginScreenProps, "theme" | "layout" | "navi
   onApplied?(result: Applied): void;
   /** The panel's tab: shows the unsaved dot while the editor holds changes the file doesn't have. */
   tab?: Pick<PluginTab, "setModified">;
+  /**
+   * Fields at the top of the form that creates a team, which choose where it goes (the Agent teams screen's project and
+   * workspace). The target can change while the form is open; the editor keeps the goal typed so far.
+   */
+  where?: ReactNode;
 };
 
 type ApplyInput = { target: Target; team: Team; request?: string; mode?: TeamMode; source: "dialog" | "again"; where: Where };
@@ -72,7 +77,7 @@ function ErrorText({ k, children }: { k: Kit; children: ReactNode }) {
 }
 
 /** Propose, review, edit, save and start the team of the target's workspace (or of a project, from the Agent teams screen). */
-export function TeamEditor({ theme, layout, navigation, target, onApplied, tab }: TeamEditorProps) {
+export function TeamEditor({ theme, layout, navigation, target, onApplied, tab, where }: TeamEditorProps) {
   const k = useKit(theme, layout.compact);
   const { t, locale } = useT();
   const toast = useToast();
@@ -93,8 +98,10 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied, tab }
   const presetSettings = useSettings(presetsSettings);
   const presets: readonly Preset[] = presetSettings.status === "ready" ? presetSettings.values.presets : [];
 
-  const current = useQuery({ queryKey: ["workspace-agents", "team", target], queryFn: () => read(target) });
+  // With `where`, the form stays up while a newly picked target is read, and waits for it before it makes a draft.
+  const current = useQuery({ queryKey: ["workspace-agents", "team", target], queryFn: () => read(target), placeholderData: where ? keepPreviousData : undefined });
   const data = current.data;
+  const reading = current.isPlaceholderData;
   const catalog = data?.catalog ?? [];
   const history = useHistory<Team | null>(null);
   const draft = history.value;
@@ -522,18 +529,19 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied, tab }
                   <Text style={k.t.muted}>{t(here === null ? "create.intro" : "create.introHere")}</Text>
                 </View>
               </View>
+              {where}
               <TextField k={k} multiline minHeight={72} value={goal} placeholder={t("create.goalPlaceholder")} accessibilityLabel={t("create.goalPlaceholder")} onChangeText={setGoal} />
               <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 10 }}>
-                <Button k={k} variant="primary" size="lg" icon="Sparkles" label={goal.trim() ? t("create.propose") : t("create.proposeFromProject")} busy={start.isPending} disabled={teamBusy} onPress={() => start.mutate()} />
+                <Button k={k} variant="primary" size="lg" icon="Sparkles" label={goal.trim() ? t("create.propose") : t("create.proposeFromProject")} busy={start.isPending} disabled={teamBusy || reading} onPress={() => start.mutate()} />
                 <Text style={k.t.muted}>{t("editorUi.create.or")}</Text>
-                <Button k={k} size="lg" icon="Plus" label={t("create.blank")} onPress={blank} />
+                <Button k={k} size="lg" icon="Plus" label={t("create.blank")} disabled={reading} onPress={blank} />
               </View>
               {presets.length ? (
                 <View style={{ gap: 8, paddingTop: 12, borderTopWidth: 1, borderTopColor: k.c.border }}>
                   <Text style={k.t.label}>{t("presets.fromPreset")}</Text>
                   <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                     {presets.map((preset) => (
-                      <Chip key={preset.id} k={k} icon="Star" label={preset.name} onPress={() => fromPreset(preset)} />
+                      <Chip key={preset.id} k={k} icon="Star" label={preset.name} onPress={reading ? undefined : () => fromPreset(preset)} />
                     ))}
                   </View>
                 </View>

@@ -21,6 +21,17 @@ export type SessionInfo = RpcOutput<SessionRpc>;
 export type RunView = NonNullable<SessionInfo["run"]>;
 export type Agent = DashboardAgent;
 
+/** The project's workspaces no team runs in: where a new team, a reconnected team or a task from a preset can go. */
+export function freeWorkspaces(project: Pick<ProjectTeams, "workspaces" | "teams">): ProjectTeams["workspaces"] {
+  const taken = new Set(project.teams.map((team) => team.workspaceId).filter((id) => id !== null));
+  return project.workspaces.filter((workspace) => !taken.has(workspace.id));
+}
+
+/** The projects the Agent teams screen lists: those with a team, or with a team file it couldn't read. */
+export function projectsWithTeams<P extends Pick<ProjectTeams, "teams" | "errors">>(projects: readonly P[]): P[] {
+  return projects.filter((project) => project.teams.length > 0 || project.errors.length > 0);
+}
+
 /** The workspace's team leads, newest first. */
 export function workspaceLeads(agents: readonly Agent[], workspaceId: string): Agent[] {
   return agents.filter((agent) => agent.workspaceId === workspaceId && !agent.archivedAt && agentJob(agent) === "orchestrator").sort((a, b) => b.createdAt.localeCompare(a.createdAt));

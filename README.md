@@ -41,7 +41,7 @@ When the lead hands work to a member, its chat shows a **Handed off to agent** c
 
 ![The lead's chat: two Handed off to agent cards for writer#144B and checker#1197, then an expanded Update from worker card with writer's result](docs/images/delegation-cards-en.png)
 
-The **Agent teams** screen holds the global presets (rename, copy into a project, edit, delete) and every project's teams:
+The **Agent teams** screen holds the global presets (rename, copy into a project, edit, delete) and the teams of every project that has one. **New team** asks which project and workspace the team is for:
 
 ![Agent teams screen: counts for projects, teams and presets; the Docs crew preset with its lead and candidates and the Copy to project, Edit, Rename and Delete buttons; the project proj with its teams docs and notes](docs/images/teams-screen-en.png)
 
@@ -64,7 +64,7 @@ Workspaces that run a team get a badge in the sidebar with their mode, or how ma
   - **Agents**: the agent tree, with three densities, closed agents and sub-agents.
   - **One page per part of the mode**: in team mode the brief, Kanban task board, plan approval, chat-style team board and file claims; in delegation mode the task split, sub-agent contexts, reports and summary.
   - **Data flow**: every step of the run.
-- **Agent teams** screen (sidebar): every project's teams (open, reconnect, delete), and the **team presets**: rename one, copy it into a project as a team file, edit or delete it. **New task from preset** writes the team for a new or free workspace and starts the lead with your request.
+- **Agent teams** screen (sidebar): the teams of every project that has one (open, reconnect, delete); **New team**, whose form picks the project and a workspace without a team (or a new one); and the **team presets**: rename one, copy it into a project as a team file, edit or delete it. **New task from preset** writes the team for a new or free workspace and starts the lead with your request.
 - **Candidate members**: a pool of models described by what each is good at and must not do. The lead assigns work by those descriptions and never uses a model outside the pool.
 - **Language**: the UI follows Paseo's language (English, 한국어, 日本語, 简体中文). Set a team's agent language to Chinese or English to choose the prompts, the tool texts and the language of the agents' replies.
 
@@ -156,7 +156,7 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
 
 ![协调器对话：writer#9727 和 checker#56B4 的两张「已移交给智能体」卡片，以及两人的「来自工作者的更新」卡片](docs/images/delegation-cards-zh.png)
 
-**智能体团队**页：全局预设（重命名、复制到项目、编辑、删除）和各项目的团队：
+**智能体团队**页：全局预设（重命名、复制到项目、编辑、删除）和有团队的项目及其团队。**新建团队**会在表单里选择项目和工作区：
 
 ![智能体团队页：项目、团队、预设三个数字；Docs crew 预设显示协调器、候选成员，以及复制到项目、编辑、重命名、删除按钮；项目 proj 下的团队 docs 和 notes](docs/images/teams-screen-zh.png)
 
@@ -179,7 +179,7 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
   - **智能体**：智能体树，有三种密度，能显示已关闭的 agent 和子 agent。
   - **每个组件一页**：团队模式下是需求简报、看板式任务板、计划审批、对话式团队黑板、文件认领；委派模式下是任务拆分、子智能体上下文、结果汇报、汇总。
   - **数据流**：运行中的每一步。
-- **智能体团队**页（侧边栏）：各项目的团队（打开、重新关联、删除），以及**团队预设**：可以重命名、复制到项目里成为团队文件、编辑或删除。**用预设开始新任务**会为新建或空闲的工作区写好团队，并把你的需求作为协调器的第一条消息启动它。
+- **智能体团队**页（侧边栏）：有团队的项目及其团队（打开、重新关联、删除）；**新建团队**在表单里选择项目，以及一个还没有团队的工作区（或新建工作区）；以及**团队预设**：可以重命名、复制到项目里成为团队文件、编辑或删除。**用预设开始新任务**会为新建或空闲的工作区写好团队，并把你的需求作为协调器的第一条消息启动它。
 - **候选成员**：一组模型，每个写明擅长什么、不要交给它什么。协调器按描述分工，绝不使用池子以外的模型。
 - **语言**：界面跟随 Paseo 的语言（English、한국어、日本語、简体中文）。团队的智能体语言可以设为中文或英文，决定提示词、工具文字和智能体回复所用的语言。
 

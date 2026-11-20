@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentState, copyWorkspace, fileTitle, leadMembers, parsedTeam, relativeTo, renameProblem, runtimeText, teamLabel, workspaceLeads, type Agent, type RunView } from "../client/side/model";
+import { agentState, copyWorkspace, fileTitle, freeWorkspaces, leadMembers, parsedTeam, projectsWithTeams, relativeTo, renameProblem, runtimeText, teamLabel, workspaceLeads, type Agent, type ProjectTeam, type ProjectTeams, type RunView } from "../client/side/model";
 import * as side from "../shared/messages-side";
 
 const agent = (id: string, extra: Partial<Agent> = {}): Agent => ({ id, workspaceId: "w1", provider: "claude", model: "haiku", title: id, status: "idle", labels: {}, createdAt: "2026-11-19T10:00:00.000Z", ...extra });
@@ -112,6 +112,31 @@ describe("preset edits", () => {
     expect(copyWorkspace("Review crew", ["main", "Review crew"], { title: "main", hasTeam: true })).toBe("Review crew-2");
     expect(copyWorkspace("main", [], { title: "main", hasTeam: true })).toBe("main-2");
     expect(copyWorkspace("  ", [], null)).toBe("team");
+  });
+});
+
+describe("the Agent teams screen's projects", () => {
+  const team = (file: string, workspaceId: string | null): ProjectTeam => ({ file, goal: "", orchestratorWorkspace: file, workspaceId, roles: 1, candidates: 0, mode: "auto", orchestrator: { provider: "claude", model: "haiku" }, language: null });
+  const project = (id: string, teams: ProjectTeam[], errors: string[] = []): ProjectTeams => ({
+    id,
+    name: id,
+    root: `/src/${id}`,
+    workspaces: [
+      { id: `${id}-main`, title: "main" },
+      { id: `${id}-ui`, title: "ui" },
+    ],
+    teams,
+    errors,
+  });
+
+  it("list only projects with a team, or with a team file that couldn't be read", () => {
+    const projects = [project("empty", []), project("teams", [team("a.json", "teams-main")]), project("broken", [], ["bad.json: not JSON"])];
+    expect(projectsWithTeams(projects).map((entry) => entry.id)).toEqual(["teams", "broken"]);
+  });
+
+  it("offer a new team only the workspaces no team runs in", () => {
+    expect(freeWorkspaces(project("p", [team("a.json", "p-main"), team("gone.json", null)])).map((entry) => entry.id)).toEqual(["p-ui"]);
+    expect(freeWorkspaces(project("p", [])).map((entry) => entry.id)).toEqual(["p-main", "p-ui"]);
   });
 });
 

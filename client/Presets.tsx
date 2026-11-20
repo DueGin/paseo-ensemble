@@ -14,7 +14,7 @@ import { teamLegacyPresetsRpc, teamPresetStartRpc } from "../shared/rpc";
 import { catalogFrom, validateTeam, type ProviderEntry, type ProviderInfo } from "../shared/validate";
 import { messages } from "./i18n";
 import { Badge, Button, Callout, Card, Chip, Empty, Field, Input, makeKit, MODE_LOOK, PART, SectionHeader, Segmented, Spinner, T, Tile, type Kit } from "./kit";
-import { copyWorkspace, relativeTo, runtimeText, type ProjectTeams as Project } from "./side/data";
+import { copyWorkspace, freeWorkspaces, relativeTo, runtimeText, type ProjectTeams as Project } from "./side/data";
 import { CandidateEditor, ModelSelect, type ProviderIcons } from "./side/model-select";
 import { LANGUAGE_NAMES, PresetCard, useCopyPreset, usePresetLibrary } from "./side/preset-card";
 
@@ -268,8 +268,7 @@ export function StartFromPresetDialog({ colors, compact = false, project, preset
       if (result.ok) onStarted(result);
     },
   });
-  const occupied = new Set((project?.teams ?? []).map((team) => team.workspaceId).filter((id): id is string => id !== null));
-  const free = (project?.workspaces ?? []).filter((workspace) => !occupied.has(workspace.id));
+  const free = project ? freeWorkspaces(project) : [];
   const errors = started.error ? [String(started.error)] : started.data && !started.data.ok ? started.data.errors : [];
   return (
     <Modal title={project ? t("presets.startTitle", { project: project.name }) : ""} open={project !== null} onOpenChange={(open) => { if (!open && !started.isPending) onClose(); }}>
