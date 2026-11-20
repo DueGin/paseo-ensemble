@@ -4,7 +4,7 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import type { ReactNode } from "react";
 import { Pressable, Text, View } from "react-native";
 import { withAlpha } from "../../shared/color";
-import { Badge, Button, Dot, MODE_LOOK, PART, Tile, type Kit } from "../kit";
+import { AgentAvatar, Badge, Button, Dot, MODE_LOOK, PART, Tile, type Kit } from "../kit";
 import { agoText, CornerDot, durationText, EmptyLine, FieldLabel, Grid, hovered, ink, memberStateText, memberTone, PartyTag, SectionTitle, timeText, useWidth, type RunView, type SessionInfo, type Tr } from "./common";
 
 type RunMember = RunView["members"][number];
@@ -113,7 +113,7 @@ function MemberCard({ k, t, member, runtime, onPress }: { k: Kit; t: Tr; member:
       })}
     >
       <View>
-        <Tile k={k} icon="Bot" tone={tone} size={32} />
+        {runtime.provider ? <AgentAvatar k={k} provider={runtime.provider} model={runtime.model} size={32} /> : <Tile k={k} icon="Bot" tone={tone} size={32} />}
         <CornerDot k={k} tone={tone} live={live} />
       </View>
       <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
@@ -125,8 +125,9 @@ function MemberCard({ k, t, member, runtime, onPress }: { k: Kit; t: Tr; member:
           {onPress ? <Icon name="ArrowUpRight" size={12} color={k.c.mutedFg} /> : null}
         </View>
         <Text numberOfLines={1} style={{ color: k.c.mutedFg, fontSize: 11 }}>
-          {member.role}
-          {where ? <Text style={{ fontFamily: "Menlo", fontSize: 10.5 }}>{` · ${where}`}</Text> : null}
+          {/* The title is the role's name unless two members share it, so the role shows only when it differs. */}
+          {member.role.toLowerCase() === member.title.toLowerCase() ? null : member.role}
+          {where ? <Text style={{ fontFamily: "Menlo", fontSize: 10.5 }}>{member.role.toLowerCase() === member.title.toLowerCase() ? where : ` · ${where}`}</Text> : null}
         </Text>
       </View>
     </Pressable>

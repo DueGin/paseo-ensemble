@@ -375,10 +375,10 @@ export function CountPill({ k, count, tone }: { k: Kit; count: number; tone?: st
   );
 }
 
-/** A status dot that sits on the corner of a tile. */
+/** A status dot on a tile's top-right corner (the bottom-right one holds an avatar's model). */
 export function CornerDot({ k, tone, live }: { k: Kit; tone: string; live?: boolean }) {
   return (
-    <View style={{ position: "absolute", right: -3, bottom: -3, width: 12, height: 12, borderRadius: 6, backgroundColor: k.c.card, alignItems: "center", justifyContent: "center" }}>
+    <View style={{ position: "absolute", right: -3, top: -3, width: 12, height: 12, borderRadius: 6, backgroundColor: k.c.card, alignItems: "center", justifyContent: "center" }}>
       <Dot tone={tone} live={live} size={8} />
     </View>
   );

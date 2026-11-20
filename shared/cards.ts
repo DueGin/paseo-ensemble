@@ -29,6 +29,9 @@ export const UpdateCardSchema = z.object({
   title: z.string(),
   role: z.string(),
   outcome: z.enum(["completed", "failed", "canceled"]),
+  /** The member's client and model, for its avatar; cards written before they were added have neither. */
+  provider: z.string().optional(),
+  model: z.string().optional(),
   /** Its result, shortened. */
   result: z.string(),
   at: z.string(),

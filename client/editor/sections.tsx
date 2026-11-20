@@ -5,7 +5,7 @@ import { withAlpha } from "../../shared/color";
 import { MODE_SPECS, TEAM_MODES, type PromptLanguage, type TeamMode } from "../../shared/modes";
 import { candidateHandle, type Candidate, type Role } from "../../shared/team";
 import type { ProviderInfo } from "../../shared/validate";
-import { Card, MODE_LOOK, PART, roleTone, Segmented, Tile, type Kit } from "../kit";
+import { AgentAvatar, Card, MODE_LOOK, PART, roleTone, Segmented, Tile, type Kit } from "../kit";
 import { LANGUAGE_NAMES, useT, type Translate } from "./common";
 import { Anchor, FieldIssues, FolderChips, Grid, hasError, LinkButton, RuntimeEditor, Slot, TextField, ToolButton, useIssues } from "./controls";
 
@@ -125,7 +125,7 @@ export function RoleCard({ k, role, index, catalog, icons, autoFocus, onChange, 
     <Anchor field={field} style={{ flexGrow: 1 }}>
       <Card k={k} tone={tone} style={{ flexGrow: 1, gap: 12, padding: 14, paddingBottom: 16, borderRadius: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Tile k={k} tone={tone} size={32} letter={(role.name.trim()[0] ?? "?").toUpperCase()} />
+          <AgentAvatar k={k} provider={role.provider} model={role.model} icons={icons} size={32} />
           <Anchor field={`${field}.name`} style={{ flex: 1 }}>
             <TextField k={k} variant="title" value={role.name} placeholder={t("editorUi.role.namePlaceholder")} accessibilityLabel={t("editorUi.role.name")} invalid={hasError(nameIssues)} autoFocus={autoFocus} selectTextOnFocus={autoFocus} autoCapitalize="none" onChangeText={(name) => onChange({ ...role, name }, `${field}.name`)} />
           </Anchor>
@@ -157,7 +157,7 @@ export function CandidateCard({ k, candidate, index, catalog, icons, autoFocus, 
     <Anchor field={field} style={{ flexGrow: 1 }}>
       <Card k={k} style={{ flexGrow: 1, gap: 12, padding: 14, paddingBottom: 16, borderRadius: 12 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Tile k={k} tone={PART.board} size={32} icon="Bot" />
+          <AgentAvatar k={k} provider={candidate.provider} model={candidate.model} icons={icons} size={32} />
           <Anchor field={`${field}.name`} style={{ flex: 1, flexDirection: "row", alignItems: "center" }}>
             <View pointerEvents="none" style={{ position: "absolute", left: 9, zIndex: 1 }}>
               <Text style={{ color: k.c.mutedFg, fontFamily: "Menlo", fontSize: 13 }}>@</Text>

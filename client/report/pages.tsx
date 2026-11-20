@@ -6,7 +6,7 @@ import { Pressable, Text, View } from "react-native";
 import { withAlpha } from "../../shared/color";
 import { componentsOf, flowTotals, type RunComponent } from "../../shared/flow";
 import type { CollabMode } from "../../shared/modes";
-import { Badge, Callout, Chip, Dot, Empty, PART, roleTone, Tile, type Kit } from "../kit";
+import { AgentAvatar, Badge, Callout, Chip, Dot, Empty, PART, roleTone, Tile, type Kit } from "../kit";
 import {
   aboutText, agoText, bodyText, Bullets, COMPONENT_ICON, componentName, CountPill, durationText, EmptyLine, EventRow, Facts, Field, FieldLabel, FileChips, Grid, History, hovered, IdPill, ink, isLight, LEAD_TONE, LinkText, LongText,
   memberStateText, memberTone, Panel, partyName, PartyTag, pageTone, planBadge, planLabel, planTone, RolePill, SectionTitle, Stat, taskTone, Usage,
@@ -425,9 +425,13 @@ export function BoardPage({ k, t, run, now, wide, openAgent }: PageProps) {
               </View>
             ) : null}
             <View style={{ flexDirection: lead ? "row-reverse" : "row", alignItems: "flex-start", gap: 9, maxWidth: brief ? "100%" : "92%", alignSelf: lead ? "flex-end" : "flex-start" }}>
-              <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(tone, 0.2), borderWidth: 1, borderColor: withAlpha(tone, 0.35) }}>
-                {lead ? <Icon name="Crown" size={13} color={ink(k, tone)} /> : <Text style={{ color: ink(k, tone), fontSize: 10.5, fontWeight: "800" }}>{initials(author)}</Text>}
-              </View>
+              {!lead && memberOf(run, post.agentId)?.provider ? (
+                <AgentAvatar k={k} provider={memberOf(run, post.agentId)!.provider!} model={memberOf(run, post.agentId)!.model} size={28} />
+              ) : (
+                <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: withAlpha(tone, 0.2), borderWidth: 1, borderColor: withAlpha(tone, 0.35) }}>
+                  {lead ? <Icon name="Crown" size={13} color={ink(k, tone)} /> : <Text style={{ color: ink(k, tone), fontSize: 10.5, fontWeight: "800" }}>{initials(author)}</Text>}
+                </View>
+              )}
               <View
                 style={{
                   flexShrink: 1,
@@ -779,10 +783,10 @@ export function ContextsPage({ k, t, run, now, openAgent }: PageProps) {
               {/* The dashed inner frame: a context of its own. */}
               <View pointerEvents="none" style={{ position: "absolute", left: 4, top: 4, right: 4, bottom: 4, borderRadius: k.radius, borderWidth: 1, borderStyle: "dashed", borderColor: withAlpha(PART.contexts, 0.3) }} />
               <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <Tile k={k} icon="Bot" tone={tone} size={28} />
+                {member.provider ? <AgentAvatar k={k} provider={member.provider} model={member.model} size={28} /> : <Tile k={k} icon="Bot" tone={tone} size={28} />}
                 <View style={{ flex: 1, minWidth: 0, gap: 1, alignItems: "flex-start" }}>
                   <PartyTag k={k} name={member.title} tone={tone} live={live} onPress={openAgent ? () => openAgent(member.agentId) : undefined} label={t("reportUi.openAgent")} />
-                  <Text style={k.t.tiny}>{member.role}</Text>
+                  {member.role.toLowerCase() === member.title.toLowerCase() ? null : <Text style={k.t.tiny}>{member.role}</Text>}
                 </View>
                 <Badge k={k} tone={tone} label={memberStateText(member, t)} />
               </View>

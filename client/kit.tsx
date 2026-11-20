@@ -7,6 +7,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Pressable, Text, TextInput, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
+import { clientMark, modelMark, type Mark } from "../shared/agent-marks";
 import { withAlpha } from "../shared/color";
 
 /** The kit for one theme and layout: the colors and the shared styles. Make it once per surface with `useKit`. */
@@ -156,6 +157,44 @@ export function Tile({ k, icon, tone, size = 26, letter }: { k: Kit; icon?: stri
   return (
     <View style={{ width: size, height: size, borderRadius: Math.round(size * 0.27), backgroundColor: withAlpha(color, 0.18), alignItems: "center", justifyContent: "center" }}>
       {letter ? <Text style={{ color, fontSize: Math.round(size * 0.5), fontWeight: "700" }}>{letter}</Text> : <Icon name={icon ?? "Circle"} size={Math.round(size * 0.58)} color={color} />}
+    </View>
+  );
+}
+
+/** A mark at `size`: its SVG (single-color marks take `color`), else its letter. */
+function MarkGlyph({ mark, size, color }: { mark: Mark; size: number; color: string }) {
+  if (mark.kind === "svg") return <Icon icon={{ svg: mark.svg }} size={size} color={color} />;
+  return <Text style={{ color, fontSize: Math.round(size * 0.82), lineHeight: Math.round(size * 1.05), fontWeight: "800" }}>{mark.letter}</Text>;
+}
+
+/**
+ * An agent's avatar: its client's mark (Claude Code, Codex, OpenCode…) on a muted tile, badged at the bottom right with
+ * the mark of the model it runs (Anthropic, OpenAI, DeepSeek…). `icons` are the provider snapshot's marks, for clients
+ * the plugin has none for. `model` null or empty draws no badge.
+ */
+export function AgentAvatar({ k, provider, model, size = 28, icons }: { k: Kit; provider: string; model?: string | null; size?: number; icons?: ReadonlyMap<string, string | undefined> }) {
+  const client = clientMark(provider, icons?.get(provider));
+  const vendor = modelMark(model, provider);
+  const badge = Math.max(10, Math.round(size * 0.5));
+  return (
+    <View style={{ width: size, height: size }}>
+      <View style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), backgroundColor: k.c.muted, borderWidth: 1, borderColor: withAlpha(k.c.fg, 0.08), alignItems: "center", justifyContent: "center" }}>
+        <MarkGlyph mark={client} size={Math.round(size * 0.6)} color={k.c.fg} />
+      </View>
+      {vendor ? (
+        <View style={{ position: "absolute", right: -Math.round(badge * 0.28), bottom: -Math.round(badge * 0.28), width: badge, height: badge, borderRadius: badge / 2, backgroundColor: k.c.card, borderWidth: 1, borderColor: k.c.border, alignItems: "center", justifyContent: "center" }}>
+          <MarkGlyph mark={vendor} size={Math.round(badge * 0.66)} color={k.c.fg} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** A client's mark alone, on a small muted square: for picking a provider, where no model is chosen yet. */
+export function ClientMark({ k, provider, size = 18, icons }: { k: Kit; provider: string; size?: number; icons?: ReadonlyMap<string, string | undefined> }) {
+  return (
+    <View style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), backgroundColor: k.c.muted, alignItems: "center", justifyContent: "center" }}>
+      <MarkGlyph mark={clientMark(provider, icons?.get(provider))} size={Math.round(size * 0.64)} color={k.c.fg} />
     </View>
   );
 }

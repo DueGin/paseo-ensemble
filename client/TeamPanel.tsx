@@ -1,12 +1,10 @@
 // The Agent team panel of a workspace: the team editor (client/editor/), plus the older form controls the presets
-// library still builds on (styles, Button, SelectHost, ModelPicker, ModePicker, LanguagePicker, CandidateEditor, TeamModel).
+// library still builds on (styles, Button, SelectHost, ModelPicker, ModePicker, LanguagePicker, CandidateEditor).
 import type { PluginWorkspacePanelProps } from "@getpaseo/plugin/client";
 import { useTranslation } from "@getpaseo/plugin/client";
-import { Icon } from "@getpaseo/plugin/client/ui";
 import { useMemo, type ReactNode } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import { languageFromLocale, PROMPT_LANGUAGES, TEAM_MODES, type PromptLanguage, type TeamMode } from "../shared/modes";
-import { providerIcon } from "../shared/provider-icons";
 import { candidateHandle, type Candidate } from "../shared/team";
 import type { ProviderInfo } from "../shared/validate";
 import { LANGUAGE_NAMES } from "./editor/common";
@@ -194,18 +192,6 @@ export function CandidateEditor({ s, candidate, catalog, onChange, onRemove }: {
         <TextInput style={[s.input, { flex: 1, minWidth: 0 }]} value={candidate.name} placeholder={t("candidates.name", { handle: candidateHandle(candidate.model) })} onChangeText={(name) => onChange({ ...candidate, name })} />
         <Button s={s} secondary label={t("candidates.remove")} onPress={onRemove} />
       </View>
-    </View>
-  );
-}
-
-export function TeamModel({ provider, model, colors, icons }: { provider: string; model: string; colors: Colors; icons: Map<string, string | undefined> }) {
-  const icon = providerIcon(provider, icons.get(provider));
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0, flexShrink: 1 }}>
-      <View style={{ width: 24, height: 24, borderRadius: 8, backgroundColor: colors.surface2, alignItems: "center", justifyContent: "center" }}>
-        {icon.kind === "svg" ? <Icon icon={{ svg: icon.svg }} size={14} color={colors.foreground} /> : <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 12 }}>{icon.letter}</Text>}
-      </View>
-      <Text style={{ color: colors.foregroundMuted, fontSize: 12, flexShrink: 1 }}>{model}</Text>
     </View>
   );
 }

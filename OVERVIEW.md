@@ -29,6 +29,8 @@ team:       request → intake with you → confirmed brief → members on a sha
 - Describe your goal to have a planner propose the team, leave the goal empty to have it read the project and work the goal out itself, or start with an empty team. The planner proposes fixed roles and/or candidate members, and a collaboration mode.
 - Review the draft in the team editor, then press **Save** (writes the team file only) or **Start a session** (writes it and starts the lead, with an optional first request and the session's mode and agent language, in this workspace, the one named in the team, or a new one).
 
+- Members are named after their roles (`tester`, or `tester 2` when the lead has two), and each one's avatar is its agent client's mark with the vendor of its model in the corner. A candidate member gets work under a role named for the job, with the candidate named separately.
+
 ### Reviewing a proposal
 
 - Review the names, models, folders and instructions of every role before you start a session. The editor checks the team as you edit: its header shows **Valid** or the number of problems, and each problem links to its field. Every role runs in the orchestrator's workspace.

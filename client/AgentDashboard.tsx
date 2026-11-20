@@ -9,12 +9,11 @@ import { withAlpha } from "../shared/color";
 import { buildAgentForest, canArchive, canDismiss, dismissibleIds, sessionForest, sessionMembers, sessionRootOf, titleParts, type AgentNode } from "../shared/agent-tree";
 import { agentLanguage } from "../shared/cleanup";
 import { DASHBOARD_DENSITIES, DEFAULT_DENSITY, densityLayout, type DashboardDensityLayout } from "../shared/dashboard-density";
-import { providerIcon } from "../shared/provider-icons";
 import { TEAM_MODES, type TeamMode } from "../shared/modes";
 import { teamRosterRpc, teamSessionModeRpc, teamSessionRpc } from "../shared/rpc";
 import { applySubagentUpdate, mergeSubagents, subagentAgents, subagentsFromTimeline, type ProviderSubagent } from "../shared/subagents";
 import { messages } from "./i18n";
-import { Button, Callout, Dot, Empty, Segmented, Spinner, Tile, useKit, type Kit } from "./kit";
+import { AgentAvatar, Button, Callout, Dot, Empty, Segmented, Spinner, Tile, useKit, type Kit } from "./kit";
 import { COMPONENT_PAGES, ComponentDetail, ModeSwitch, PartTabs, pagesOf, RunOverview, SessionTabs, useSessionDetail, type ComponentPage, type SessionTab } from "./RunComponents";
 
 const stateSchema = z.object({
@@ -57,15 +56,9 @@ function shortModel(model: string): string {
   return base.replace(/^claude-/, "");
 }
 
-/** The provider's mark on a muted tile. */
+/** The agent's client, badged with its model's vendor. */
 function Logo({ node, icons, k, size }: { node: AgentNode; icons: TreeProps["icons"]; k: Kit; size: number }) {
-  const icon = providerIcon(node.agent.provider, icons.get(node.agent.provider));
-  const svgSize = size >= 24 ? size - 10 : Math.max(9, size - 5);
-  return (
-    <View style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), backgroundColor: k.c.muted, borderWidth: 1, borderColor: withAlpha(k.c.fg, 0.06), alignItems: "center", justifyContent: "center" }}>
-      {icon.kind === "svg" ? <Icon icon={{ svg: icon.svg }} size={svgSize} color={k.c.fg} /> : <Text style={{ color: k.c.fg, fontWeight: "700", fontSize: size / 2 }}>{icon.letter}</Text>}
-    </View>
-  );
+  return <AgentAvatar k={k} provider={node.agent.provider} model={node.model} size={size} icons={icons} />;
 }
 
 /** The agent's state on its card: waiting, a pulsing dot while it runs, or a tinted mark for attention and done. */

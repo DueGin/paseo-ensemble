@@ -201,9 +201,14 @@ export function newRunId(random: () => number = Math.random): string {
   return `R${Math.floor(random() * 0x100000000).toString(16).padStart(8, "0").toUpperCase()}`;
 }
 
-/** A member title such as `ui#ADB2`. */
-export function memberTitle(role: string, random: () => number = Math.random): string {
-  return `${role}#${Math.floor(random() * 0x10000).toString(16).padStart(4, "0").toUpperCase()}`;
+/** A member's title: its role's name, numbered (`ui 2`) when another member of the lead already has that title. */
+export function memberTitle(role: string, taken: readonly string[] = []): string {
+  const name = role.trim();
+  const used = new Set(taken.map((title) => title.trim().toLowerCase()));
+  if (!used.has(name.toLowerCase())) return name;
+  let n = 2;
+  while (used.has(`${name} ${n}`.toLowerCase())) n += 1;
+  return `${name} ${n}`;
 }
 
 export function createRun(input: { id: string; leadAgentId: string; workspaceId: string; mode: CollabMode; title: string; reason?: string; rounds?: number; brief?: Brief | null; planApproval?: boolean; language?: PromptLanguage; now: string }): Run {

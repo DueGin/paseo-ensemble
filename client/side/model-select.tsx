@@ -5,29 +5,23 @@ import { Icon, Modal } from "@getpaseo/plugin/client/ui";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { withAlpha } from "../../shared/color";
-import { providerIcon } from "../../shared/provider-icons";
 import { candidateHandle, type Candidate } from "../../shared/team";
 import type { ProviderInfo } from "../../shared/validate";
 import { messages } from "../i18n";
-import { Button, Card, Field, Input, T, type Kit } from "../kit";
+import { AgentAvatar, Button, Card, ClientMark, Field, Input, T, type Kit } from "../kit";
 
 export type ProviderIcons = Map<string, string | undefined>;
 
-/** The provider's mark on a small muted square. */
+/** The provider's (client's) mark on a small muted square. */
 export function ProviderMark({ k, provider, icons, size = 20 }: { k: Kit; provider: string; icons: ProviderIcons; size?: number }) {
-  const icon = providerIcon(provider, icons.get(provider));
-  return (
-    <View style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), backgroundColor: k.c.muted, alignItems: "center", justifyContent: "center" }}>
-      {icon.kind === "svg" ? <Icon icon={{ svg: icon.svg }} size={Math.round(size * 0.62)} color={k.c.fg} /> : <Text style={{ color: k.c.fg, fontWeight: "700", fontSize: Math.round(size * 0.5) }}>{icon.letter}</Text>}
-    </View>
-  );
+  return <ClientMark k={k} provider={provider} icons={icons} size={size} />;
 }
 
-/** A model shown as its provider's mark and `provider/model`. */
+/** A model shown as its client's avatar, badged with the model's vendor, and `provider/model`. */
 export function ModelLine({ k, provider, model, icons }: { k: Kit; provider: string; model: string; icons: ProviderIcons }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0, flexShrink: 1 }}>
-      <ProviderMark k={k} provider={provider} icons={icons} size={18} />
+      <AgentAvatar k={k} provider={provider} model={model} icons={icons} size={20} />
       <T k={k} v="small" numberOfLines={1} style={{ flexShrink: 1, color: k.c.mutedFg }}>
         {model ? `${provider}/${model}` : provider}
       </T>
@@ -58,7 +52,7 @@ export function ModelSelect({ k, catalog, icons, provider, model, title, onChang
         }}
         style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 32, paddingHorizontal: 9, paddingVertical: 5, borderRadius: k.radius - 2, borderWidth: 1, borderColor: set ? k.c.border : k.c.bad, backgroundColor: pressed ? k.c.muted : k.c.bg })}
       >
-        {provider ? <ProviderMark k={k} provider={provider} icons={icons} /> : null}
+        {provider ? <AgentAvatar k={k} provider={provider} model={model} icons={icons} size={20} /> : null}
         <T k={k} v="small" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
           {set ? `${provider}/${model}` : "—"}
         </T>

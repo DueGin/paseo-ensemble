@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Animated, Easing, Platform, Pressable, Text, View, type LayoutChangeEvent } from "react-native";
 import { withAlpha } from "../../shared/color";
 import { componentsOf, type RunComponent } from "../../shared/flow";
-import { Dot, PART, Tile, type Kit } from "../kit";
+import { AgentAvatar, Dot, PART, Tile, type Kit } from "../kit";
 import { centred, stack, type Box } from "./flow-layout";
 import { agoText, COMPONENT_ICON, componentName, describeEvent, hovered, LEAD_TONE, LIVE_MS, LivePill, memberStateText, memberTone, partyName, summaryOf, useWidth, type ComponentPage, type FlowEvent, type RunView, type SessionInfo, type Tr } from "./common";
 
@@ -211,12 +211,14 @@ export interface DiagramProps {
   aside?: ReactNode;
   /** Events to draw lines for: the latest this many. */
   window?: number;
+  /** A member's client and model, for its avatar. */
+  runtimeOf?: (agentId: string) => { provider: string | null; model: string | null };
 }
 
 /** The gap between the participants, and between the part cards. */
 const ROW_GAP = 8;
 
-export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, onOpen, openAgent, aside, window: span = 24 }: DiagramProps) {
+export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, onOpen, openAgent, aside, window: span = 24, runtimeOf }: DiagramProps) {
   const packet = usePacket();
   const [width, onLayout] = useWidth();
   const stacked = width > 0 && width < 520;
@@ -375,7 +377,11 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
                 opacity: partyDim(party) ? 0.4 : member?.retired ? 0.55 : 1,
               })}
             >
-              <Tile k={k} icon={partyIcon(party)} tone={lead ? LEAD_TONE : state.tone} size={26} />
+              {member && runtimeOf?.(party).provider ? (
+                <AgentAvatar k={k} provider={runtimeOf(party).provider!} model={runtimeOf(party).model} size={26} />
+              ) : (
+                <Tile k={k} icon={partyIcon(party)} tone={lead ? LEAD_TONE : state.tone} size={26} />
+              )}
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text numberOfLines={1} style={{ color: k.c.fg, fontSize: 12.5, fontWeight: lead ? "800" : "600" }}>
                   {partyName(party, run.members, t)}
@@ -384,7 +390,7 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
                     <Dot tone={state.tone} live={state.live} size={6} />
                     <Text numberOfLines={1} style={{ flex: 1, minWidth: 0, color: k.c.mutedFg, fontSize: 10.5 }}>
-                      {state.role} · {state.text}
+                      {state.role.toLowerCase() === (member.title ?? "").toLowerCase() ? state.text : `${state.role} · ${state.text}`}
                     </Text>
                   </View>
                 ) : null}

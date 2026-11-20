@@ -5,14 +5,14 @@ import { useState, type ReactNode } from "react";
 import { Text, View } from "react-native";
 import { withAlpha } from "../../shared/color";
 import type { Team } from "../../shared/team";
-import { Badge, Card, roleTone, Tile, type Kit } from "../kit";
+import { AgentAvatar, Badge, Card, Tile, type Kit } from "../kit";
 import { useT } from "./common";
-import { LinkButton, ProviderMark } from "./controls";
+import { LinkButton } from "./controls";
 
 function ModelLine({ k, provider, model, icons }: { k: Kit; provider: string; model: string; icons: ReadonlyMap<string, string | undefined> }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, minWidth: 0, flexShrink: 1 }}>
-      <ProviderMark k={k} provider={provider} icons={icons} size={20} />
+      <AgentAvatar k={k} provider={provider} model={model} icons={icons} size={22} />
       <Text style={{ color: k.c.mutedFg, fontSize: 12, fontFamily: "Menlo", flexShrink: 1 }} numberOfLines={1}>
         {model}
       </Text>
@@ -44,7 +44,6 @@ export function TeamMap({ k, team, icons }: { k: Kit; team: Team; icons: Readonl
             </View>
             <View style={{ flex: 1, minWidth: 0, paddingVertical: 4 }}>
               <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 8, padding: 8, borderRadius: k.radius, borderWidth: 1, borderColor: k.c.border, backgroundColor: k.c.bg }}>
-                <Tile k={k} tone={roleTone(index)} size={22} letter={(role.name[0] ?? "?").toUpperCase()} />
                 <Text style={{ color: k.c.fg, fontSize: 13, fontWeight: "700", minWidth: 72, maxWidth: "100%", flexShrink: 1 }} numberOfLines={1}>
                   {role.name}
                 </Text>

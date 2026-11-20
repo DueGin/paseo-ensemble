@@ -7,10 +7,9 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { HANDOFF_CARD, HandoffCardSchema, UPDATE_CARD, UpdateCardSchema, type HandoffCard, type UpdateCard } from "../shared/cards";
-import { providerIcon } from "../shared/provider-icons";
 import { withAlpha } from "../shared/color";
 import { messages } from "./i18n";
-import { useKit, type Kit } from "./kit";
+import { AgentAvatar, useKit, type Kit } from "./kit";
 import { SESSION_PANEL } from "./session-access";
 
 const clock = (iso: string) => {
@@ -18,14 +17,6 @@ const clock = (iso: string) => {
   return Number.isNaN(at.getTime()) ? "" : `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 };
 
-function ProviderMark({ k, provider }: { k: Kit; provider: string }) {
-  const icon = providerIcon(provider);
-  return (
-    <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: k.c.muted, alignItems: "center", justifyContent: "center" }}>
-      {icon.kind === "svg" ? <Icon icon={{ svg: icon.svg }} size={13} color={k.c.fg} /> : <Text style={{ color: k.c.fg, fontWeight: "700", fontSize: 11 }}>{icon.letter}</Text>}
-    </View>
-  );
-}
 
 /** The card's frame: a mark, a quiet verb, the member in bold, an arrow and the time; tap to expand. */
 function CardFrame({ k, mark, verb, title, at, tone, onOpen, onDashboard, children }: { k: Kit; mark: React.ReactNode; verb: string; title: string; at: string; tone?: string; onOpen?: () => void; onDashboard?: () => void; children?: React.ReactNode }) {
@@ -65,7 +56,7 @@ function makeCards(client: PluginClientContext) {
     return (
       <CardFrame
         k={k}
-        mark={<ProviderMark k={k} provider={card.provider} />}
+        mark={<AgentAvatar k={k} provider={card.provider} model={card.model} size={24} />}
         verb={card.continued ? t("cards.continued") : t("cards.handoff")}
         title={card.title}
         at={card.at}
@@ -91,9 +82,19 @@ function makeCards(client: PluginClientContext) {
       <CardFrame
         k={k}
         mark={
-          <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: withAlpha(tone ?? k.c.ok, 0.18), alignItems: "center", justifyContent: "center" }}>
-            <Icon name={card.outcome === "completed" ? "Check" : card.outcome === "failed" ? "X" : "CircleSlash"} size={13} color={tone ?? k.c.ok} />
-          </View>
+          card.provider ? (
+            // The member's avatar, with the outcome on its top-right corner.
+            <View>
+              <AgentAvatar k={k} provider={card.provider} model={card.model} size={24} />
+              <View style={{ position: "absolute", top: -4, right: -4, width: 13, height: 13, borderRadius: 7, backgroundColor: tone ?? k.c.ok, borderWidth: 1.5, borderColor: k.c.card, alignItems: "center", justifyContent: "center" }}>
+                <Icon name={card.outcome === "completed" ? "Check" : card.outcome === "failed" ? "X" : "Minus"} size={8} color={k.c.card} />
+              </View>
+            </View>
+          ) : (
+            <View style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: withAlpha(tone ?? k.c.ok, 0.18), alignItems: "center", justifyContent: "center" }}>
+              <Icon name={card.outcome === "completed" ? "Check" : card.outcome === "failed" ? "X" : "CircleSlash"} size={13} color={tone ?? k.c.ok} />
+            </View>
+          )
         }
         verb={card.outcome === "completed" ? t("cards.update") : `${t("cards.update")} · ${card.outcome === "failed" ? t("cards.failed") : t("cards.canceled")}`}
         title={card.title}

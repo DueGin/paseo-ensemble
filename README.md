@@ -41,6 +41,8 @@ When the lead hands work to a member, its chat shows a **Handed off to agent** c
 
 ![The lead's chat: two Handed off to agent cards for writer#144B and checker#1197, then an expanded Update from worker card with writer's result](docs/images/delegation-cards-en.png)
 
+Members are named after their roles, and every member's avatar is its agent client's mark (Claude Code, Codex, OpenCode…) with the vendor of its model in the corner (Anthropic, OpenAI, DeepSeek…).
+
 The **Agent teams** screen holds the global presets (rename, copy into a project, edit, delete) and the teams of every project that has one. **New team** asks which project and workspace the team is for:
 
 ![Agent teams screen: counts for projects, teams and presets; the Docs crew preset with its lead and candidates and the Copy to project, Edit, Rename and Delete buttons; the project proj with its teams docs and notes](docs/images/teams-screen-en.png)
@@ -155,6 +157,8 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
 协调器把工作交给成员时，对话里会出现**已移交给智能体**卡片；成员汇报后出现**来自工作者的更新**卡片。展开卡片可以看任务或结果，点成员名字打开它的对话：
 
 ![协调器对话：writer#9727 和 checker#56B4 的两张「已移交给智能体」卡片，以及两人的「来自工作者的更新」卡片](docs/images/delegation-cards-zh.png)
+
+成员以角色名命名，每个成员的头像是它所用的 Agent 客户端图标（Claude Code、Codex、OpenCode 等），右下角是它所用模型的厂商图标（Anthropic、OpenAI、DeepSeek 等）。
 
 **智能体团队**页：全局预设（重命名、复制到项目、编辑、删除）和有团队的项目及其团队。**新建团队**会在表单里选择项目和工作区：
 

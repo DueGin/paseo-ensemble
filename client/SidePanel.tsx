@@ -132,6 +132,7 @@ export function SidePanel({ workspaceId, theme, navigation, tab: panelTab, openP
                 workspace={data}
                 leads={leads}
                 agents={agents.data ?? []}
+                icons={icons}
                 selected={state.session}
                 onSelect={(session) => setState({ ...state, session })}
                 onStart={() => setTab("start")}

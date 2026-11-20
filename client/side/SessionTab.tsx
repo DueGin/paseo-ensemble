@@ -8,8 +8,9 @@ import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { TEAM_MODES, type TeamMode } from "../../shared/modes";
 import { teamSessionModeRpc, teamSessionRpc } from "../../shared/rpc";
-import { Badge, Button, Callout, Card, Dot, Empty, MODE_LOOK, PART, Segmented, Spinner, stateTone, T, Tile, type Kit } from "../kit";
+import { AgentAvatar, Badge, Button, Callout, Card, Dot, Empty, MODE_LOOK, PART, Segmented, Spinner, stateTone, T, Tile, type Kit } from "../kit";
 import { agentState, leadFile, leadMembers, runtimeText, SESSIONS_KEY, sessionKey, teamLabel, type Agent, type MemberRow, type WorkspaceTeam } from "./data";
+import type { ProviderIcons } from "./model-select";
 import { agoText, LIVE_MS, PartCards, PartyChips, useNow, type Translate } from "./run-parts";
 
 const AGENT_STATES = ["working", "idle", "attention", "failed", "starting", "ended"] as const;
@@ -77,12 +78,17 @@ function SessionPicker({ k, t, leads, current, workspace, now, onSelect }: { k: 
   );
 }
 
-function MemberRowCard({ k, t, member, openAgent }: { k: Kit; t: Translate; member: MemberRow; openAgent?: (id: string) => void }) {
+function MemberRowCard({ k, t, member, icons, openAgent }: { k: Kit; t: Translate; member: MemberRow; icons: ProviderIcons; openAgent?: (id: string) => void }) {
   const state = member.retired ? "retired" : member.state;
   const press = member.open && openAgent ? () => openAgent(member.agentId) : undefined;
   return (
     <Card k={k} onPress={press} label={member.title} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 7, paddingHorizontal: 10, opacity: member.retired ? 0.6 : 1 }}>
-      <Dot tone={stateTone(k, state)} live={member.live} />
+      <View>
+        {member.provider ? <AgentAvatar k={k} provider={member.provider} model={member.model} icons={icons} size={24} /> : <Tile k={k} icon="Bot" size={24} />}
+        <View style={{ position: "absolute", left: -2, top: -2, width: 10, height: 10, borderRadius: 5, backgroundColor: k.c.card, alignItems: "center", justifyContent: "center" }}>
+          <Dot tone={stateTone(k, state)} live={member.live} size={7} />
+        </View>
+      </View>
       <View style={{ flex: 1, minWidth: 0 }}>
         <T k={k} v="strong" numberOfLines={1}>
           {member.title}
@@ -137,7 +143,7 @@ function ModeSwitch({ k, t, leadAgentId, info }: { k: Kit; t: Translate; leadAge
   );
 }
 
-export function SessionTab({ k, t, workspace, leads, agents, selected, onSelect, onStart, openAgent, openDashboard }: { k: Kit; t: Translate; workspace: WorkspaceTeam | undefined; leads: readonly Agent[]; agents: readonly Agent[]; selected: string | null; onSelect(id: string): void; onStart(): void; openAgent?: (agentId: string) => void; openDashboard?: (agentId: string) => void }) {
+export function SessionTab({ k, t, workspace, leads, agents, icons, selected, onSelect, onStart, openAgent, openDashboard }: { k: Kit; t: Translate; workspace: WorkspaceTeam | undefined; leads: readonly Agent[]; agents: readonly Agent[]; icons: ProviderIcons; selected: string | null; onSelect(id: string): void; onStart(): void; openAgent?: (agentId: string) => void; openDashboard?: (agentId: string) => void }) {
   const now = useNow();
   const current = leads.find((lead) => lead.id === selected) ?? leads[0] ?? null;
   const readSession = useRpc(teamSessionRpc);
@@ -172,7 +178,12 @@ export function SessionTab({ k, t, workspace, leads, agents, selected, onSelect,
 
       <Card k={k} style={{ gap: 10 }}>
         <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
-          <Tile k={k} icon="Crown" size={28} />
+          <View>
+            <AgentAvatar k={k} provider={current.provider ?? ""} model={current.model} icons={icons} size={28} />
+            <View style={{ position: "absolute", left: -3, top: -3, width: 13, height: 13, borderRadius: 7, backgroundColor: k.c.card, alignItems: "center", justifyContent: "center" }}>
+              <Icon name="Crown" size={9} color={k.c.primary} />
+            </View>
+          </View>
           <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
             <T k={k} v="h3" numberOfLines={1}>
               {teamLabel(workspace?.team, file, workspace?.workspace ?? current.title ?? "")}
@@ -225,7 +236,7 @@ export function SessionTab({ k, t, workspace, leads, agents, selected, onSelect,
         <T k={k} v="label">
           {t("sideUi.session.members")} · {members.length}
         </T>
-        {members.length ? members.map((member) => <MemberRowCard key={member.agentId} k={k} t={t} member={member} openAgent={openAgent} />) : <T k={k} v="muted">{t("sideUi.session.noMembers")}</T>}
+        {members.length ? members.map((member) => <MemberRowCard key={member.agentId} k={k} t={t} member={member} icons={icons} openAgent={openAgent} />) : <T k={k} v="muted">{t("sideUi.session.noMembers")}</T>}
       </View>
 
       {run ? (

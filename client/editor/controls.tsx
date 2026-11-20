@@ -5,9 +5,8 @@ import { Icon } from "@getpaseo/plugin/client/ui";
 import { Children, createContext, forwardRef, useContext, useState, type ReactNode } from "react";
 import { Pressable, Text, TextInput, View, type StyleProp, type TextInputProps, type TextStyle, type ViewStyle } from "react-native";
 import { withAlpha } from "../../shared/color";
-import { providerIcon } from "../../shared/provider-icons";
 import type { ProviderInfo } from "../../shared/validate";
-import type { Kit } from "../kit";
+import { ClientMark, type Kit } from "../kit";
 import { useT } from "./common";
 import { useSelect, type PickerLook } from "./picker";
 import type { Issue } from "./validate";
@@ -152,14 +151,9 @@ export function SelectField({ k, label, value, options, onChange, invalid, leadi
   );
 }
 
-/** A provider's mark: its logo, else its initial. */
+/** A provider's (client's) mark: its logo, else its initial. */
 export function ProviderMark({ k, provider, icons, size = 18 }: { k: Kit; provider: string; icons: ReadonlyMap<string, string | undefined>; size?: number }) {
-  const icon = providerIcon(provider, icons.get(provider));
-  return (
-    <View style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), backgroundColor: k.c.muted, alignItems: "center", justifyContent: "center" }}>
-      {icon.kind === "svg" ? <Icon icon={{ svg: icon.svg }} size={Math.round(size * 0.62)} color={k.c.fg} /> : <Text style={{ color: k.c.fg, fontWeight: "700", fontSize: Math.round(size * 0.55) }}>{icon.letter}</Text>}
-    </View>
-  );
+  return <ClientMark k={k} provider={provider} icons={icons} size={size} />;
 }
 
 /** Provider and model, limited to what this host can run; a provider change picks its first model. */

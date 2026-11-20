@@ -78,7 +78,8 @@ describe("orchestratorPrompt", () => {
     expect(preset).toContain("- sol (codex/gpt-6.1-sol)\n  (no description: a general member; give it work its model suits)");
     expect(preset).toMatch(/A candidate is a model, not a job/);
     expect(preset).toMatch(/must not do, or is not suited for, as a hard rule: never give it that work/);
-    expect(preset).toMatch(/give work straight to a candidate by its name/);
+    expect(preset).toMatch(/set role to a short lowercase job name .* and candidate to the candidate's name/);
+    expect(preset).toMatch(/a candidate's own name is not a role/);
     expect(preset).toContain(LEAD_TOOLS.role);
     expect(preset).not.toContain("`helper`");
   });

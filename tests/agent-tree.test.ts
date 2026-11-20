@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { agentNode, buildAgentForest, canArchive, canDismiss, dismissibleIds, formatAgentTitle, isHidden, parentOf, titleParts, type AgentNode, type DashboardAgent } from "../shared/agent-tree";
-import { PROVIDER_LOGOS, providerIcon } from "../shared/provider-icons";
 
 const PARENT = "paseo.parent-agent-id";
 
@@ -445,37 +444,6 @@ describe("default effort", () => {
 
   it("does not change agentNode called on its own", () => {
     expect(agentNode(agent("a"))).toMatchObject({ effort: null, effortDefault: false });
-  });
-});
-
-describe("PROVIDER_LOGOS", () => {
-  it.each(["claude", "codex", "copilot"])("has an inline svg for %s", (provider) => {
-    const svg = PROVIDER_LOGOS[provider];
-    expect(svg).toBeDefined();
-    expect(svg!.trimStart().startsWith("<svg")).toBe(true);
-    expect(svg).toContain("viewBox");
-    expect(svg).not.toMatch(/<script|href=|xlink:|https?:/i);
-  });
-});
-
-describe("providerIcon", () => {
-  it("uses the built-in logo first", () => {
-    expect(providerIcon("claude", "<svg>snapshot</svg>")).toEqual({ kind: "svg", svg: PROVIDER_LOGOS.claude });
-    expect(providerIcon("codex")).toEqual({ kind: "svg", svg: PROVIDER_LOGOS.codex });
-  });
-
-  it("falls back to the snapshot svg", () => {
-    expect(providerIcon("antigravity", "<svg>snapshot</svg>")).toEqual({ kind: "svg", svg: "<svg>snapshot</svg>" });
-  });
-
-  it("falls back to the uppercased first letter", () => {
-    expect(providerIcon("antigravity")).toEqual({ kind: "letter", letter: "A" });
-    expect(providerIcon("omp", null)).toEqual({ kind: "letter", letter: "O" });
-    expect(providerIcon("omp", "")).toEqual({ kind: "letter", letter: "O" });
-  });
-
-  it("uses ? for an empty provider", () => {
-    expect(providerIcon("")).toEqual({ kind: "letter", letter: "?" });
   });
 });
 

@@ -181,6 +181,7 @@ export function RunOverview({
           selected={page ?? null}
           onOpen={onOpen}
           openAgent={openAgent}
+          runtimeOf={runtimeOf}
           aside={<RecentFlows k={k} t={t} run={run} total={full?.events.length ?? run.events.length} now={now} onOpen={onOpen} />}
         />
       </Panel>

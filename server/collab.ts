@@ -393,6 +393,7 @@ const headerFor = (spec: MemberSpec, lang: PromptLanguage) => (spec.formed ? pro
 
 interface AgentLike {
   id: string;
+  title?: string | null;
   workspaceId?: string | null;
   provider: string;
   model?: string | null;
@@ -433,7 +434,9 @@ async function dispatch(paseo: PaseoApi, ctx: LeadContext, leadId: string, spec:
   }
   const entries = await providerEntries(paseo);
   const featureValues = await featuresFor(paseo, entries, `${spec.provider}/${spec.model}`, ctx.project.root);
-  const title = memberTitle(spec.name);
+  // A member is named after its role; a second one the lead still has gets a number.
+  const mine = (await paseo.agents.list()).entries.map((entry) => entry.agent as unknown as AgentLike).filter((agent) => !agent.archivedAt && parentOf(agent) === leadId && agentJob(agent) === "member");
+  const title = memberTitle(spec.name, mine.map((agent) => agent.title ?? ""));
   const agent = await paseo.workspaces.ref(ctx.workspaceId).agents.create({
     // A member works for the lead unattended: its provider's full-access mode, so it never stops on a permission prompt.
     config: { provider: `${spec.provider}/${spec.model}`, modeId: memberModeOf(entries, spec.provider), ...(featureValues ? { featureValues } : {}), systemPrompt: promptsFor(lang).memberSystemPrompt(ctx.team, spec) },
@@ -681,7 +684,9 @@ async function finishIfCurrent(paseo: PaseoApi, runId: string, seen: RunMember, 
   });
   if (finished) {
     const member = memberOf(run, seen.agentId);
-    await showUpdate(paseo, run.leadAgentId, { runId: run.id, workspaceId: run.workspaceId, agentId: seen.agentId, title: member?.title ?? seen.title, role: member?.role ?? seen.role, outcome, result: excerpt(message ?? "", 1200), at: now() });
+    const agent = await agentStatus(paseo, seen.agentId);
+    const runtime = agent ? { provider: agent.provider, ...(agent.model ? { model: agent.model } : {}) } : {};
+    await showUpdate(paseo, run.leadAgentId, { runId: run.id, workspaceId: run.workspaceId, agentId: seen.agentId, title: member?.title ?? seen.title, role: member?.role ?? seen.role, outcome, ...runtime, result: excerpt(message ?? "", 1200), at: now() });
   }
   return run;
 }
@@ -910,11 +915,69 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       fixed.length ? tr(`Roles: ${fixed.join(", ")}.`, `固定角色：${fixed.join(", ")}。`) : "",
       formed.length ? tr(`Roles you formed: ${formed.join(", ")}.`, `你建的角色：${formed.join(", ")}。`) : "",
       ctx.team.candidates.length
-        ? tr(`Candidates, which take work directly: ${ctx.team.candidates.map((candidate) => candidate.name).join(", ")}; or form a narrower role on one with ${L.role}.`, `候选成员（可直接把工作交给它们）：${ctx.team.candidates.map((candidate) => candidate.name).join(", ")}；也可以用 ${L.role} 在某个候选上建更具体的角色。`)
+        ? tr(`Candidates: ${ctx.team.candidates.map((candidate) => candidate.name).join(", ")}. To give one work, name the job as the role and the candidate as candidate, such as {"role": "tester", "candidate": "${ctx.team.candidates[0]!.name}"}.`, `候选成员：${ctx.team.candidates.map((candidate) => candidate.name).join(", ")}。要把工作交给某个候选成员，role 填岗位名、candidate 填候选成员，例如 {"role": "tester", "candidate": "${ctx.team.candidates[0]!.name}"}。`)
         : tr(`Or "${HELPER}".`, `或者用 "${HELPER}"。`),
     ].filter(Boolean).join(" ");
   };
   const unknownRole = (ctx: LeadContext, role: string) => tr(`Unknown role "${role}". ${hint(ctx)}`, `未知角色「${role}」。${hint(ctx)}`);
+
+  const formedSpec = (role: SessionRole): MemberSpec => ({ name: role.name, provider: role.provider, model: role.model, folders: role.folders, instructions: role.instructions, formed: true });
+
+  /**
+   * The role the lead names for new work: a fixed or formed role; with `candidate`, a new role formed on it for the
+   * session (returned in `formed`, not saved yet). A candidate's own name is refused, so every member is named for a job.
+   * `forming` holds the roles this same call forms before this one.
+   */
+  const pickRole = (ctx: LeadContext, name: string, candidate: string | undefined, forming: readonly SessionRole[] = []): { spec: MemberSpec; formed: SessionRole | null } | string => {
+    const roleName = name.trim();
+    const wanted = candidate?.trim() ?? "";
+    const pick = wanted ? ctx.team.candidates.find((entry) => key(entry.name) === key(wanted)) : undefined;
+    const list = ctx.team.candidates.map((entry) => entry.name).join(", ");
+    if (wanted && !pick) return ctx.team.candidates.length ? tr(`There is no candidate "${wanted}". Candidates: ${list}.`, `没有候选成员「${wanted}」。候选成员：${list}。`) : tr(`This team has no candidate members; leave candidate out. ${hint(ctx)}`, `这个团队没有候选成员，请不要填 candidate。${hint(ctx)}`);
+    const fixed = ctx.team.roles.find((role) => key(role.name) === key(roleName));
+    if (fixed) return pick ? tr(`"${fixed.name}" is a fixed role with its own model; leave candidate out, or name another job for ${pick.name}.`, `「${fixed.name}」是固定角色，有自己的模型；请不要填 candidate，或为 ${pick.name} 另起一个岗位名。`) : { spec: { ...fixed, formed: false }, formed: null };
+    const session = [...ctx.sessionRoles, ...forming].find((role) => key(role.name) === key(roleName));
+    if (session) {
+      if (pick && key(pick.name) !== key(session.candidate)) return tr(`${session.name} runs on ${session.candidate}. Move it with ${L.role}, or name another job for ${pick.name}.`, `${session.name} 运行在 ${session.candidate} 上。要换候选成员请用 ${L.role}，或者为 ${pick.name} 另起一个岗位名。`);
+      return { spec: formedSpec(session), formed: null };
+    }
+    const asCandidate = ctx.team.candidates.find((entry) => key(entry.name) === key(roleName));
+    if (asCandidate) {
+      return pick
+        ? tr(`"${roleName}" is a candidate's name; name the job instead, such as api, tester or docs.`, `「${roleName}」是候选成员的名字，请改用岗位名，例如 api、tester 或 docs。`)
+        : tr(`${asCandidate.name} is a candidate, not a job. Name the job in role (such as api, tester or docs) and the candidate in candidate: {"role": "tester", "candidate": "${asCandidate.name}"}.`, `${asCandidate.name} 是候选成员，不是岗位。请在 role 填岗位名（例如 api、tester 或 docs），在 candidate 填候选成员：{"role": "tester", "candidate": "${asCandidate.name}"}。`);
+    }
+    if (pick) {
+      if (!roleName || RESERVED.has(key(roleName))) return tr(`"${roleName}" is reserved; pick another role name.`, `「${roleName}」是保留名，请换一个角色名。`);
+      const role: SessionRole = { name: roleName, candidate: pick.name, provider: pick.provider, model: pick.model, folders: [], instructions: pick.notes.trim(), createdAt: now() };
+      return { spec: formedSpec(role), formed: role };
+    }
+    const spec = roleSpec(ctx, roleName);
+    return spec ? { spec, formed: null } : unknownRole(ctx, roleName);
+  };
+
+  /** Saves the roles a call formed, and adds them to the context it goes on with. */
+  const saveFormed = async (ctx: LeadContext, leadId: string, formed: readonly SessionRole[]): Promise<void> => {
+    if (!formed.length) return;
+    ctx.sessionRoles = [...ctx.sessionRoles, ...formed];
+    await store.setSessionRoles(ctx.project.root, leadId, ctx.sessionRoles);
+  };
+
+  /** Roles named with their candidates, all checked before any is formed: the error, or the specs by name and the new roles. */
+  const pickRoles = (ctx: LeadContext, named: readonly { role: string; candidate?: string }[]): { specs: Map<string, MemberSpec>; formed: SessionRole[] } | string => {
+    const specs = new Map<string, MemberSpec>();
+    const formed: SessionRole[] = [];
+    for (const entry of named) {
+      const picked = pickRole(ctx, entry.role, entry.candidate, formed);
+      if (typeof picked === "string") return picked;
+      if (picked.formed) formed.push(picked.formed);
+      specs.set(key(entry.role), picked.spec);
+    }
+    return { specs, formed };
+  };
+
+  /** A member as tool results name it: its title, its role when the title isn't just that, and its model. */
+  const memberLine = (title: string, spec: MemberSpec): string => `${title} (${key(title) === key(spec.name) ? "" : `${spec.name}, `}${spec.provider}/${spec.model})`;
 
   const rosterText = (ctx: LeadContext): string => {
     const { team } = ctx;
@@ -923,7 +986,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       lines.push(tr("Fixed roles:", "固定角色："), tr("| Role | Provider/model | Folders |", "| 角色 | Provider/模型 | 文件夹 |"), "| --- | --- | --- |", ...team.roles.map((role) => `| ${role.name} | ${role.provider}/${role.model} | ${role.folders.length ? role.folders.join(", ") : tr("(any)", "（不限）")} |`));
     }
     if (team.candidates.length) {
-      lines.push("", tr("Candidate members (give work to them directly by name, or form a narrower role on one; assign by description, and never give a candidate work its description rules out):", "候选成员（可按名称直接交给它们工作，也可在某个候选上建更具体的角色；按描述分工，描述里排除的工作绝不交给它）："));
+      lines.push("", tr("Candidate members (give one work under a role named for the job, with candidate set to its name; assign by description, and never give a candidate work its description rules out):", "候选成员（把工作交给它时，用岗位名作为角色，candidate 填它的名字；按描述分工，描述里排除的工作绝不交给它）："));
       for (const candidate of team.candidates) {
         lines.push(`- ${candidate.name} (${candidate.provider}/${candidate.model})`, ...(candidate.notes.trim() ? candidate.notes.trim().split("\n").map((line) => `  ${line.trim()}`) : [tr("  (no description)", "  （无描述）")]));
       }
@@ -942,8 +1005,10 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
     if (!wanted.length) return tr(`No roles yet. ${hint(ctx)}`, `还没有角色。${hint(ctx)}`);
     const specs: MemberSpec[] = [];
     for (const name of [...wanted, ...fromTasks]) {
-      const spec = roleSpec(ctx, name);
-      if (!spec || spec.name === HELPER) return unknownRole(ctx, name);
+      const picked = pickRole(ctx, name, undefined);
+      if (typeof picked === "string") return picked;
+      const spec = picked.spec;
+      if (spec.name === HELPER) return unknownRole(ctx, name);
       if (!specs.some((entry) => key(entry.name) === key(spec.name))) specs.push(spec);
     }
     return specs;
@@ -1007,8 +1072,8 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
     name: L.role,
     title: tr("Form a role", "建角色"),
     description: tr(
-      "With candidate members: form a narrower role for this session on one candidate (its own instructions and folders, or a second job on the same model), change its candidate, or remove it. Not needed to give work to a candidate: name the candidate as the role. A role can only run on a candidate's provider and model.",
-      "有候选成员时：在某个候选上为本会话建一个更具体的角色（有自己的说明和文件夹，或在同一模型上承担第二份工作），更换它的候选，或删除它。只是把工作交给候选的话不需要建角色：直接把候选名当作角色。角色只能运行在候选成员的 provider 和模型上。",
+      "With candidate members: form a role for this session on one candidate with its own instructions and folders, change its candidate, or remove it. Not needed just to give a candidate work: name the job as the role and the candidate as candidate in the delegate or task tools, which form the role. A role can only run on a candidate's provider and model.",
+      "有候选成员时：在某个候选上为本会话建一个有自己说明和文件夹的角色，更换它的候选，或删除它。只是把工作交给候选的话不需要先建角色：在委派或任务工具里 role 填岗位名、candidate 填候选成员，角色会自动建立。角色只能运行在候选成员的 provider 和模型上。",
     ),
     input: z.object({
       name: z.string().min(1).describe(tr("Short lowercase role name, such as api or tester", "简短的小写角色名，例如 api 或 tester")),
@@ -1071,7 +1136,8 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
     ),
     input: z.object({
       tasks: z.array(z.object({
-        role: z.string().min(1).describe(tr(`A fixed role, a candidate's name (assign by its description), a role you formed, or "${HELPER}" (teams without candidates) when nothing fits`, `固定角色、候选成员名（按其描述分工）、你建的角色，或在都不合适时用 "${HELPER}"（仅限没有候选成员的团队）`)),
+        role: z.string().min(1).describe(tr(`A fixed role, a role you formed, a new role named for the job (with candidate), or "${HELPER}" (teams without candidates) when nothing fits`, `固定角色、你建的角色、以岗位命名的新角色（同时填 candidate），或在都不合适时用 "${HELPER}"（仅限没有候选成员的团队）`)),
+        candidate: z.string().optional().describe(tr("The candidate member a new role runs on (assign by its description); the role is formed for this session and its member is named after it", "新角色运行在哪个候选成员上（按其描述分工）；角色会在本会话中建立，成员以角色名命名")),
         task: z.string().min(1).describe(tr("A self-contained task: context, files, acceptance criteria and what to report back", "独立完整的任务：背景、文件、验收标准，以及要汇报什么")),
       })).min(1).max(8),
       title: z.string().optional().describe(tr("A short title for the user's request", "用户需求的简短标题")),
@@ -1082,9 +1148,10 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       if (!allowsMode(ctx.effective, "delegation")) return fail(refusal(ctx));
       // Several tasks for one role go to that role as one task, so its member works through them in order.
       const byRole = new Map<string, { spec: MemberSpec; tasks: string[] }>();
+      const picked = pickRoles(ctx, tasks);
+      if (typeof picked === "string") return fail(picked);
       for (const entry of tasks) {
-        const spec = roleSpec(ctx, entry.role);
-        if (!spec) return fail(unknownRole(ctx, entry.role));
+        const spec = picked.specs.get(key(entry.role))!;
         const group = byRole.get(key(spec.name)) ?? { spec, tasks: [] };
         group.tasks.push(entry.task.trim());
         byRole.set(key(spec.name), group);
@@ -1100,6 +1167,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
         if (busy.length) return fail(tr(`${busy.map((group) => group.spec.name).join(", ")} still work on run ${run.id}. Call ${L.wait} first, or ${L.send} to change their task.`, `${busy.map((group) => group.spec.name).join(", ")} 还在运行 ${run.id} 中工作。请先调用 ${L.wait}，或用 ${L.send} 修改它们的任务。`));
       }
       await lockIfAuto(ctx, agent.id, "delegation");
+      await saveFormed(ctx, agent.id, picked.formed);
       if (run) {
         run = await store.mutate(run.id, (current) => ({ ...startBatch(current, now()), title: title?.trim() || current.title, reason: reason?.trim() || current.reason }));
       } else {
@@ -1118,7 +1186,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
           const started = await dispatch(paseo, ctx, agent.id, spec, P.delegationTaskPrompt(run, header ? `${header}\n\n${task}` : task), lang, task);
           run = await store.mutate(run.id, (current) => mirrorTask(upsertMember(current, { role: spec.name, agentId: started.agentId, title: started.title, task }, now()), spec.name, started.agentId, started.title, task));
           run = await store.log(run.id, [contextEvent(started.agentId, spec, started.continued)]);
-          lines.push(`- ${started.title} (${spec.name}, ${spec.provider}/${spec.model}): ${started.continued ? tr("continued", "沿用已有成员") : tr("started", "已启动")}`);
+          lines.push(`- ${memberLine(started.title, spec)}: ${started.continued ? tr("continued", "沿用已有成员") : tr("started", "已启动")}`);
         } catch (error) {
           lines.push(`- ${spec.name}: ${tr("not started", "未启动")}: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -1145,7 +1213,8 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
   const PlanTaskInput = z.object({
     title: z.string().min(1),
     detail: z.string().optional().describe(tr("What done means for this task", "这个任务怎样算完成")),
-    role: z.string().optional().describe(tr("The role that should do it; omit for anyone", "应该由哪个角色做；不填表示任何人")),
+    role: z.string().optional().describe(tr("The role that should do it, named for the job; omit for anyone", "应该由哪个角色做，以岗位命名；不填表示任何人")),
+    candidate: z.string().optional().describe(tr("For a new role: the candidate member it runs on; the role is formed for this session", "新角色运行在哪个候选成员上；角色会在本会话中建立")),
     after: z.array(z.number().int().min(1)).optional().describe(tr("Positions (1-based) of earlier tasks in this list it waits for", "它要等待的、本列表中排在前面的任务序号（从 1 开始）")),
     files: z.array(z.string()).optional().describe(tr("Paths it will change; claimed for its owner while it works", "它会改动的路径；负责人工作期间会被认领")),
   });
@@ -1168,8 +1237,12 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
     async execute({ brief, tasks, roles, rounds, planApproval, reason }, { agent, paseo }) {
       const ctx = await leadContext(paseo, agent);
       if (!allowsMode(ctx.effective, "team")) return fail(refusal(ctx));
-      const plan: NewTask[] = (tasks ?? []).map((task) => ({ title: task.title, detail: task.detail, role: task.role?.trim() || null, after: (task.after ?? []).map(String), files: task.files }));
-      const specs = teamSpecs(ctx, roles, plan);
+      // New roles the tasks name with their candidates are checked together, then formed, so the plan names known roles.
+      const picked = pickRoles(ctx, (tasks ?? []).filter((task) => task.role?.trim()).map((task) => ({ role: task.role!, candidate: task.candidate })));
+      if (typeof picked === "string") return fail(picked);
+      const plan: NewTask[] = (tasks ?? []).map((task) => ({ title: task.title, detail: task.detail, role: task.role?.trim() ? picked.specs.get(key(task.role))!.name : null, after: (task.after ?? []).map(String), files: task.files }));
+      const known = { ...ctx, sessionRoles: [...ctx.sessionRoles, ...picked.formed] };
+      const specs = teamSpecs(known, roles, plan);
       if (typeof specs === "string") return fail(specs);
       const check = addTasks(createRun({ id: "R0", leadAgentId: agent.id, workspaceId: ctx.workspaceId, mode: "team", title: "check", language: lang, now: now() }), plan, "lead", now());
       if (check.errors.length) return fail(`${tr("The task plan has problems:", "任务计划有问题：")}\n${check.errors.map((error) => `- ${error}`).join("\n")}`);
@@ -1177,6 +1250,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       const page = await paseo.agents.ref(agent.id).timeline.refetch({ direction: "tail", limit: 20 });
       const recorded = { title: brief.title.trim(), goal: brief.goal.trim(), requirements: brief.requirements, acceptance: brief.acceptance, constraints: brief.constraints, outOfScope: brief.outOfScope };
       const pending: PendingBrief = { brief: recorded, roles: specs.map((spec) => spec.name), rounds: rounds ?? DEFAULT_TEAM_ROUNDS, reason: reason?.trim() ?? "", tasks: plan, planApproval: planApproval === true, seq: timelineEnd(page.entries), ...(typeof page.epoch === "string" ? { epoch: page.epoch } : {}), at: now() };
+      await saveFormed(ctx, agent.id, picked.formed);
       await store.setPendingBrief(ctx.project.root, agent.id, pending);
       return ok([
         tr("Brief recorded. Show it to the user as below, with the task plan and the roles taking part, ask them to confirm or correct it, and end your turn. Don't start members yet.", "需求简报已记录。请把下面的简报、任务计划和参与角色展示给用户，请对方确认或修改，然后结束本轮。先不要启动成员。"),
@@ -1242,7 +1316,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
             const mine = run.tasks.filter((entry) => key(entry.role ?? "") === key(spec.name)).map((entry) => `${entry.id} ${entry.title}`).join("\n");
             const started = await dispatch(paseo, ctx, agent.id, spec, P.teamKickoffPrompt(run, full, roster, spec, headerFor(spec, lang)), lang, mine || full.title);
             run = await store.mutate(run.id, (current) => upsertMember(current, { role: spec.name, agentId: started.agentId, title: started.title, task: "" }, now()));
-            lines.push(`- ${started.title} (${spec.name}, ${spec.provider}/${spec.model}): ${started.continued ? tr("continued", "沿用已有成员") : tr("started", "已启动")}`);
+            lines.push(`- ${memberLine(started.title, spec)}: ${started.continued ? tr("continued", "沿用已有成员") : tr("started", "已启动")}`);
           } catch (error) {
             lines.push(`- ${spec.name}: ${tr("not started", "未启动")}: ${error instanceof Error ? error.message : String(error)}`);
           }
@@ -1272,7 +1346,8 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       add: z.array(z.object({
         title: z.string().min(1),
         detail: z.string().optional(),
-        role: z.string().optional().describe(tr("The role that should do it; omit for anyone", "应该由哪个角色做；不填表示任何人")),
+        role: z.string().optional().describe(tr("The role that should do it, named for the job; omit for anyone", "应该由哪个角色做，以岗位命名；不填表示任何人")),
+        candidate: z.string().optional().describe(tr("For a new role: the candidate member it runs on", "新角色运行在哪个候选成员上")),
         after: z.array(z.string()).optional().describe(tr("Ids of tasks it waits for, such as T2", "它要等待的任务编号，例如 T2")),
         files: z.array(z.string()).optional(),
       })).optional(),
@@ -1281,6 +1356,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
         title: z.string().optional(),
         detail: z.string().optional(),
         role: z.string().nullable().optional().describe(tr("Reassign to a role, or null for anyone", "改派给某个角色，null 表示任何人")),
+        candidate: z.string().optional().describe(tr("For a new role: the candidate member it runs on", "新角色运行在哪个候选成员上")),
         state: z.enum(["todo", "dropped"]).optional().describe(tr("todo reopens (a done task needs feedback); dropped cancels", "todo 重新打开（已完成的任务需要 feedback）；dropped 取消")),
         after: z.array(z.string()).optional(),
         feedback: z.string().optional().describe(tr("Why it is reopened or reassigned; the next owner reads it", "为什么重新打开或改派；下一个负责人会看到")),
@@ -1296,20 +1372,23 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
       const run = leadTeamRun(agent.id);
       if (!run || run.status !== "active") return fail(tr(`There is no team run in progress. Start one with ${L.kickoff} after intake.`, `没有进行中的团队运行。完成需求对接后用 ${L.kickoff} 启动。`));
       const anyone = (role: string) => key(role) === "anyone" || role.trim() === "任何人";
-      const roleErrors = [...(add ?? []).map((task) => task.role), ...(update ?? []).map((change) => change.role)]
-        .filter((role): role is string => typeof role === "string" && role.trim() !== "" && !anyone(role))
-        .filter((role) => { const spec = roleSpec(ctx, role); return !spec || spec.name === HELPER; })
-        .map((role) => unknownRole(ctx, role));
-      if (roleErrors.length) return fail([...new Set(roleErrors)].join("\n"));
+      const named = [...(add ?? []), ...(update ?? [])].filter((entry): entry is typeof entry & { role: string } => typeof entry.role === "string" && entry.role.trim() !== "" && !anyone(entry.role));
+      const picked = pickRoles(ctx, named);
+      if (typeof picked === "string") return fail(picked);
+      const helperRole = named.find((entry) => picked.specs.get(key(entry.role))?.name === HELPER);
+      if (helperRole) return fail(unknownRole(ctx, helperRole.role));
+      await saveFormed(ctx, agent.id, picked.formed);
+      // Tasks name the role as it is spelled where it was made.
+      const roleName = (role: string) => picked.specs.get(key(role))?.name ?? role;
       const errors: string[] = [];
       await store.mutate(run.id, (current) => {
         let state = current;
         if (add?.length) {
-          const result = addTasks(state, add.map((task) => ({ ...task, role: task.role && !anyone(task.role) ? task.role : null })), "lead", now());
+          const result = addTasks(state, add.map(({ candidate: _candidate, ...task }) => ({ ...task, role: task.role && !anyone(task.role) ? roleName(task.role) : null })), "lead", now());
           errors.push(...result.errors);
           state = result.run;
         }
-        for (const change of update ?? []) {
+        for (const { candidate: _candidate, ...change } of update ?? []) {
           const before = taskOf(state, change.id);
           if (before?.state === "done" && change.state === "todo") {
             const result = rejectTask(state, change.id, change.feedback ?? "", now());
@@ -1317,7 +1396,7 @@ function buildTools(lang: PromptLanguage): { lead: AgentToolDefinition[]; member
             else state = updateTasks(result.run, [{ ...change, state: undefined, feedback: undefined } as TaskChange], now()).run;
             continue;
           }
-          const result = updateTasks(state, [{ ...change, role: change.role === undefined ? undefined : change.role && !anyone(change.role) ? change.role : null } as TaskChange], now());
+          const result = updateTasks(state, [{ ...change, role: change.role === undefined ? undefined : change.role && !anyone(change.role) ? roleName(change.role) : null } as TaskChange], now());
           errors.push(...result.errors);
           state = result.run;
           // A member that loses a task it is working on is told, so it stops instead of doing it twice.
