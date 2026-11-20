@@ -8,10 +8,10 @@ import { Animated, Easing, Platform, Pressable, Text, View, type LayoutChangeEve
 import { withAlpha } from "../../shared/color";
 import { componentsOf, type RunComponent } from "../../shared/flow";
 import { Dot, PART, Tile, type Kit } from "../kit";
+import { centred, stack, type Box } from "./flow-layout";
 import { agoText, COMPONENT_ICON, componentName, describeEvent, hovered, LEAD_TONE, LIVE_MS, LivePill, memberStateText, memberTone, partyName, summaryOf, useWidth, type ComponentPage, type FlowEvent, type RunView, type SessionInfo, type Tr } from "./common";
 
 type Link = { party: string; component: RunComponent; direction: "in" | "out"; count: number; live: boolean };
-type Box = { top: number; bottom: number };
 type Point = { x: number; y: number };
 
 /** Flows among the latest events, per party, part and direction. */
@@ -213,7 +213,8 @@ export interface DiagramProps {
   window?: number;
 }
 
-const sameBox = (a: Box | undefined, b: Box) => !!a && a.top === b.top && a.bottom === b.bottom;
+/** The gap between the participants, and between the part cards. */
+const ROW_GAP = 8;
 
 export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, onOpen, openAgent, aside, window: span = 24 }: DiagramProps) {
   const packet = usePacket();
@@ -226,9 +227,11 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
   const links = linksOf(recent, new Set(parties), now);
   const liveComponents = new Set(links.filter((link) => link.live).map((link) => link.component));
   const [hot, setHot] = useState(null as string | null);
-  const [columns, setColumns] = useState({ parties: 0, cards: 0 });
-  const [partyBox, setPartyBox] = useState<Record<string, Box>>({});
-  const [cardBox, setCardBox] = useState<Record<string, Box>>({});
+  // Heights only: positions come from them (see flow-layout.ts), since onLayout misses an element that only moves.
+  const [partyHeight, setPartyHeight] = useState<Record<string, number>>({});
+  const [cardHeight, setCardHeight] = useState<Record<string, number>>({});
+  // The row's own height: the latest flows beside it can stretch it taller than either column.
+  const [gridHeight, setGridHeight] = useState(0);
 
   const stateOf = (party: string) => {
     const member = run.members.find((entry) => entry.agentId === party);
@@ -238,14 +241,9 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
   const openId = (party: string) => (party === "lead" ? leadAgentId : run.members.some((member) => member.agentId === party) ? party : null);
   const partyDim = (party: string) => hot !== null && hot !== party && !links.some((link) => link.party === party && link.component === hot);
   const cardDim = (component: RunComponent) => hot !== null && hot !== component && !links.some((link) => link.component === component && link.party === hot);
-  const measureColumn = (key: "parties" | "cards") => (event: LayoutChangeEvent) => {
-    const y = event.nativeEvent.layout.y;
-    setColumns((current) => (current[key] === y ? current : { ...current, [key]: y }));
-  };
-  const measureBox = (set: typeof setPartyBox, key: string) => (event: LayoutChangeEvent) => {
-    const { y, height } = event.nativeEvent.layout;
-    const box = { top: y, bottom: y + height };
-    set((current) => (sameBox(current[key], box) ? current : { ...current, [key]: box }));
+  const measureHeight = (set: typeof setPartyHeight, key: string) => (event: LayoutChangeEvent) => {
+    const { height } = event.nativeEvent.layout;
+    set((current) => (current[key] === height ? current : { ...current, [key]: height }));
   };
 
   const header = (
@@ -268,7 +266,7 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
       dim={cardDim(component)}
       onOpen={() => onOpen(component)}
       onHover={(on) => setHot(on ? component : null)}
-      onLayout={measure ? measureBox(setCardBox, component) : undefined}
+      onLayout={measure ? measureHeight(setCardHeight, component) : undefined}
     />
   );
 
@@ -309,8 +307,11 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
 
   // Each card and participant spreads its lines over its own height, ordered by where the other end sits.
   const lines: { link: Link; from: Point; to: Point }[] = [];
-  const partyAt = (party: string): Box | undefined => (partyBox[party] ? { top: partyBox[party]!.top + columns.parties, bottom: partyBox[party]!.bottom + columns.parties } : undefined);
-  const cardAt = (component: string): Box | undefined => (cardBox[component] ? { top: cardBox[component]!.top + columns.cards, bottom: cardBox[component]!.bottom + columns.cards } : undefined);
+  const partyStack = stack(parties, partyHeight, ROW_GAP);
+  const cardStack = stack(components, cardHeight, ROW_GAP);
+  const placed = partyStack && cardStack ? centred(partyStack, cardStack, gridHeight) : null;
+  const partyAt = (party: string): Box | undefined => placed?.left[party];
+  const cardAt = (component: string): Box | undefined => placed?.right[component];
   const ready = links.filter((link) => partyAt(link.party) && cardAt(link.component));
   const mid = (box: Box) => (box.top + box.bottom) / 2;
   const spread = (box: Box, index: number, total: number) => {
@@ -338,14 +339,14 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
   }
 
   const grid = (
-    <View style={{ flexDirection: "row", alignItems: "center", ...(withAside ? { width: left + gap + cardsWidth! } : { flex: 1, minWidth: 0 }) }}>
+    <View onLayout={(event) => setGridHeight(event.nativeEvent.layout.height)} style={{ flexDirection: "row", alignItems: "center", ...(withAside ? { width: left + gap + cardsWidth! } : { flex: 1, minWidth: 0 }) }}>
       <View pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0 }}>
         {lines.map(({ link, from, to }) => {
           const isHot = hot !== null && (hot === link.party || hot === link.component);
           return <FlowCurve key={`${link.party}|${link.component}|${link.direction}`} k={k} from={from} to={to} color={PART[link.component]} live={link.live} dim={hot !== null && !isHot} hot={isHot} count={link.count} direction={link.direction} packet={packet} />;
         })}
       </View>
-      <View onLayout={measureColumn("parties")} style={{ width: left, gap: 8 }}>
+      <View style={{ width: left, gap: ROW_GAP }}>
         {parties.map((party) => {
           const state = stateOf(party);
           const id = openId(party);
@@ -360,7 +361,7 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
               onPress={() => id && openAgent?.(id)}
               onHoverIn={() => setHot(party)}
               onHoverOut={() => setHot(null)}
-              onLayout={measureBox(setPartyBox, party)}
+              onLayout={measureHeight(setPartyHeight, party)}
               style={(pressable) => ({
                 flexDirection: "row",
                 alignItems: "center",
@@ -393,7 +394,7 @@ export function FlowDiagram({ k, t, run, pending, now, leadAgentId, selected, on
         })}
       </View>
       <View style={{ width: gap }} />
-      <View onLayout={measureColumn("cards")} style={{ gap: 8, minWidth: 0, ...(withAside ? { width: cardsWidth } : { flex: 1 }) }}>
+      <View style={{ gap: ROW_GAP, minWidth: 0, ...(withAside ? { width: cardsWidth } : { flex: 1 }) }}>
         {components.map((component) => card(component, true))}
       </View>
     </View>

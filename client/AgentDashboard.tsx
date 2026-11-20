@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import { z } from "zod";
 import { withAlpha } from "../shared/color";
-import { buildAgentForest, canArchive, canDismiss, dismissibleIds, sessionForest, sessionMembers, sessionRootOf, titleParts, workspaceForest, type AgentNode } from "../shared/agent-tree";
+import { buildAgentForest, canArchive, canDismiss, dismissibleIds, sessionForest, sessionMembers, sessionRootOf, titleParts, type AgentNode } from "../shared/agent-tree";
 import { agentLanguage } from "../shared/cleanup";
 import { DASHBOARD_DENSITIES, DEFAULT_DENSITY, densityLayout, type DashboardDensityLayout } from "../shared/dashboard-density";
 import { providerIcon } from "../shared/provider-icons";
@@ -21,12 +21,10 @@ const stateSchema = z.object({
   showClosed: z.boolean(),
   dismissed: z.array(z.string()).catch([]),
   density: z.enum(DASHBOARD_DENSITIES).catch(DEFAULT_DENSITY),
-  /** The session picked in a workspace dashboard; null shows every session of the workspace. */
-  session: z.string().nullable().catch(null),
   /** "agents" for the agents tab; otherwise the part of the session's run whose page the overview shows (null: the first). */
   page: z.string().nullable().catch(null),
 });
-const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY, session: null as string | null, page: null as string | null };
+const DEFAULT_STATE = { showClosed: false, dismissed: [] as string[], density: DEFAULT_DENSITY, page: null as string | null };
 
 /** A packet's position along its cycle, offset per child. */
 type Phase = ReturnType<(typeof Animated)["modulo"]>;
@@ -552,35 +550,13 @@ function AnimationAnchor({ value }: { value: Animated.Value }) {
 }
 
 type DashboardProps = Pick<PluginWorkspacePanelProps, "theme" | "layout" | "navigation" | "workspaceId" | "tab"> & {
-  /** The session the dashboard was opened from; null for the workspace's dashboard. */
-  sessionAgentId: string | null;
+  /** The session the dashboard was opened from. */
+  sessionAgentId: string;
 };
-
-/** The workspace's sessions, with a picker to narrow it to one session. */
-export function AgentDashboard(props: PluginWorkspacePanelProps) {
-  return <Dashboard {...props} sessionAgentId={null} />;
-}
 
 /** One session: the agent it was opened from, the agents above and below it, and its collaboration run. */
 export function SessionDashboard(props: PluginAgentPanelProps) {
   return <Dashboard {...props} sessionAgentId={props.params.agentId} />;
-}
-
-/** A session in the scope picker: a pill, highlighted when picked. */
-function ScopeChip({ k, label, on, onPress, icon }: { k: Kit; label: string; on: boolean; onPress(): void; icon?: string }) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: on }}
-      onPress={onPress}
-      style={(state) => ({ flexDirection: "row", alignItems: "center", gap: 5, height: 26, maxWidth: 200, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: on ? k.c.primary : k.c.border, backgroundColor: on ? withAlpha(k.c.primary, 0.16) : state.pressed ? k.c.muted : k.c.card })}
-    >
-      {icon ? <Icon name={icon} size={12} color={on ? k.c.primary : k.c.mutedFg} /> : null}
-      <Text numberOfLines={1} style={{ flexShrink: 1, color: k.c.fg, fontSize: 12, fontWeight: on ? "600" : "500" }}>
-        {label}
-      </Text>
-    </Pressable>
-  );
 }
 
 /** An on/off switch with its label on the left. */
@@ -601,7 +577,7 @@ function Dashboard(props: DashboardProps) {
   const { t } = useTranslation(messages);
   const k = useKit(props.theme, props.layout.compact);
   const [state, setState] = useTabState(props.tab, stateSchema, DEFAULT_STATE);
-  const sessionId = props.sessionAgentId ?? state.session;
+  const sessionId = props.sessionAgentId;
   const archived = useMutation({
     mutationFn: (id: string) => paseo.agents.ref(id).archive(),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["dashboard", "agents"] }),
@@ -723,14 +699,13 @@ function Dashboard(props: DashboardProps) {
     const projectId = entries.find((w) => w.id === props.workspaceId)?.projectId;
     return projectId ? entries.filter((w) => w.projectId === projectId).map((w) => w.id) : [];
   }, [workspaces.data, props.workspaceId]);
-  // Sub-agents are read from each scoped agent's timeline, so only the shown session or workspace costs requests.
+  // Sub-agents are read from each of the session's agents' timelines, so only the shown session costs requests.
   const unarchivedIds = useMemo(() => {
     const raw = (agents.data?.entries ?? []).map((entry) => entry.agent);
-    const roots = sessionId ? [sessionRootOf(raw, sessionId)] : raw.filter((agent) => agent.workspaceId === props.workspaceId).map((agent) => agent.id);
-    const scope = new Set(roots.flatMap((root) => [...sessionMembers(raw, root)]));
+    const scope = sessionMembers(raw, sessionRootOf(raw, sessionId));
     const project = new Set(workspaceIds);
     return raw.filter((agent) => scope.has(agent.id) && project.has(agent.workspaceId ?? "") && !agent.archivedAt).map((agent) => agent.id);
-  }, [agents.data, workspaceIds, sessionId, props.workspaceId]);
+  }, [agents.data, workspaceIds, sessionId]);
   const subagents = useQuery({
     queryKey: ["dashboard", "subagents", unarchivedIds],
     queryFn: async () => {
@@ -749,10 +724,8 @@ function Dashboard(props: DashboardProps) {
     return [...parentAgents, ...subagentAgents(merged, parentAgents)];
   }, [agents.data, subagents.data, live]);
   const fullForest = useMemo(() => buildAgentForest(allAgents, workspaceIds, { ...state, defaultEfforts, roster: roster.data?.teams }), [allAgents, workspaceIds, state, defaultEfforts, roster.data]);
-  // The workspace's own sessions: trees whose root runs here, with the agents they started anywhere in the project.
-  const workspaceSessions = useMemo(() => workspaceForest(fullForest, props.workspaceId), [fullForest, props.workspaceId]);
-  const forest = useMemo(() => (sessionId ? sessionForest(fullForest, allAgents, sessionId) : workspaceSessions), [fullForest, allAgents, sessionId, workspaceSessions]);
-  const sessionRoot = useMemo(() => (sessionId ? sessionRootOf(allAgents, sessionId) : null), [allAgents, sessionId]);
+  const forest = useMemo(() => sessionForest(fullForest, allAgents, sessionId), [fullForest, allAgents, sessionId]);
+  const sessionRoot = useMemo(() => sessionRootOf(allAgents, sessionId), [allAgents, sessionId]);
   const readSession = useRpc(teamSessionRpc);
   const session = useQuery({
     queryKey: ["dashboard", "session", sessionRoot],
@@ -844,7 +817,6 @@ function Dashboard(props: DashboardProps) {
   const runtimes = useMemo(() => Object.fromEntries(allAgents.map((agent) => [agent.id, { provider: agent.provider, model: agent.model ?? null }])), [allAgents]);
   const run = session.data?.run ?? null;
   const fullRun = detail.data?.run && run && detail.data.run.id === run.id ? detail.data.run : null;
-  const sessions = [...workspaceSessions.trees, ...workspaceSessions.solo];
   const modeError = modeSwitch.error ? String(modeSwitch.error) : modeSwitch.data && !modeSwitch.data.ok ? modeSwitch.data.errors.join("; ") : null;
   return (
     <View style={{ flex: 1, backgroundColor: k.c.bg }}>
@@ -857,7 +829,7 @@ function Dashboard(props: DashboardProps) {
             <Tile k={k} icon={teamSession ? "Users" : "Network"} size={32} />
             <View style={{ flexShrink: 1, minWidth: 0, gap: 2 }}>
               <Text numberOfLines={1} style={[k.t.h2, { fontSize: 16 }]}>
-                {props.sessionAgentId ? t("session.title") : t("dashboardTitle")}
+                {t("session.title")}
               </Text>
               {teamSession ? (
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -878,15 +850,6 @@ function Dashboard(props: DashboardProps) {
             </View>
           ) : null}
         </View>
-        {!props.sessionAgentId && (state.session !== null || sessions.length > 1) ? (
-          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-            <Text style={[k.t.label, { marginRight: 2 }]}>{t("session.scopeLabel")}</Text>
-            <ScopeChip k={k} label={t("session.allSessions")} on={state.session === null} icon="Layers" onPress={() => setState({ ...state, session: null, page: null })} />
-            {sessions.map((node) => (
-              <ScopeChip key={node.agent.id} k={k} label={node.role || node.title} on={state.session === node.agent.id} icon={node.kind === "orchestrator" ? "Users" : "Bot"} onPress={() => setState({ ...state, session: node.agent.id, page: null })} />
-            ))}
-          </View>
-        ) : null}
         {teamSession ? <SessionTabs mode={tabMode} tab={tab} run={run} pending={!!session.data?.pendingBrief} colors={props.theme.colors} theme={props.theme} compact={props.layout.compact} t={t} parts={false} onOpen={openTab} /> : null}
       </View>
       {tab === "agents" ? (
@@ -970,7 +933,7 @@ function Dashboard(props: DashboardProps) {
               </Callout>
             ) : !forest.trees.length && !forest.solo.length ? (
               <Empty k={k} icon="Network">
-                {sessionId ? t("emptySession") : t("emptyWorkspace")}
+                {t("emptySession")}
               </Empty>
             ) : (
               <>

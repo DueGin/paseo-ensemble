@@ -59,12 +59,11 @@ Workspaces that run a team get a badge in the sidebar with their mode, or how ma
 - **Agent team sidebar** (the right sidebar's **+** menu, or **Open the Ensemble side panel** in the Command Center): **Session** has the workspace's lead with its mode switch, the members (open their chat) and the run's data flow (each part opens the session dashboard). **Start** starts a lead from this workspace's team or a preset. **Teams** lists the project's teams and presets.
 - **Delegation cards**: the lead's chat shows **Handed off to agent** when a member is given work and **Update from worker** when it reports (marked Failed or Stopped when its turn did not complete). The cards open the member's chat and the session dashboard.
 - **Members work unattended**: each member starts in its provider's full-access mode (`bypassPermissions` for Claude, `full-access` for Codex, …), and the plugin allows any tool permission prompt a member still raises, so delegated work never waits for you to click Allow. The lead keeps its reviewed auto mode.
-- **Session dashboard**: open it from the lead's **Dashboard** pill, the Command Center or `/dashboard`. It shows one conversation only, with tabs:
+- **Session dashboard**: open it with **Open the session dashboard** at the bottom of the sidebar's Session tab, the lead's **Dashboard** pill, the Command Center or `/dashboard`. It shows one conversation only, with tabs:
   - **Overview**: the mode switch (it shows a lock 🔒 once Auto has chosen), the run's header and details, the members and the data flow with the latest flows.
   - **Agents**: the agent tree, with three densities, closed agents and sub-agents.
   - **One page per part of the mode**: in team mode the brief, Kanban task board, plan approval, chat-style team board and file claims; in delegation mode the task split, sub-agent contexts, reports and summary.
   - **Data flow**: every step of the run.
-- **Agent dashboard**: every session of the workspace, as trees.
 - **Agent teams** screen (sidebar): every project's teams (open, reconnect, delete), and the **team presets**: rename one, copy it into a project as a team file, edit or delete it. **New task from preset** writes the team for a new or free workspace and starts the lead with your request.
 - **Candidate members**: a pool of models described by what each is good at and must not do. The lead assigns work by those descriptions and never uses a model outside the pool.
 - **Language**: the UI follows Paseo's language (English, 한국어, 日本語, 简体中文). Set a team's agent language to Chinese or English to choose the prompts, the tool texts and the language of the agents' replies.
@@ -175,12 +174,11 @@ Ensemble 是 [Paseo](https://paseo.sh) 的插件，为项目配一支编码智�
 - **智能体团队侧边栏**（右侧边栏的 **+** 菜单，或命令中心的「打开团队侧边栏」）：**会话**页有本工作区的协调器和模式切换、成员（可打开其对话）、本次运行的数据流（每个组件都能打开会话仪表盘）；**开始**页用本工作区的团队或预设启动协调器；**团队**页列出项目的团队和预设。
 - **委派卡片**：成员接到工作时，协调器对话里出现「已移交给智能体」；成员汇报时出现「来自工作者的更新」（完成、失败或取消）。卡片可以打开成员的对话和会话仪表盘。
 - **成员全权限运行**：每个成员都用其 provider 的完全访问模式启动（Claude 是 `bypassPermissions`，Codex 是 `full-access`……），成员仍然弹出的工具权限请求由插件自动允许，委派出去的工作不会停下来等你点「允许」。协调器仍用带审核的自动模式。
-- **会话仪表盘**：从协调器的**仪表盘**按钮、命令中心或 `/dashboard` 打开。它只显示这一段会话，分为几个标签页：
+- **会话仪表盘**：从侧边栏「会话」页底部的**打开会话仪表盘**、协调器的**仪表盘**按钮、命令中心或 `/dashboard` 打开。它只显示这一段会话，分为几个标签页：
   - **概览**：模式切换（自动模式确定后显示 🔒）、运行头部和信息、成员、数据流和最近的数据流。
   - **智能体**：智能体树，有三种密度，能显示已关闭的 agent 和子 agent。
   - **每个组件一页**：团队模式下是需求简报、看板式任务板、计划审批、对话式团队黑板、文件认领；委派模式下是任务拆分、子智能体上下文、结果汇报、汇总。
   - **数据流**：运行中的每一步。
-- **智能体仪表盘**：以树的形式展示工作区里的所有会话。
 - **智能体团队**页（侧边栏）：各项目的团队（打开、重新关联、删除），以及**团队预设**：可以重命名、复制到项目里成为团队文件、编辑或删除。**用预设开始新任务**会为新建或空闲的工作区写好团队，并把你的需求作为协调器的第一条消息启动它。
 - **候选成员**：一组模型，每个写明擅长什么、不要交给它什么。协调器按描述分工，绝不使用池子以外的模型。
 - **语言**：界面跟随 Paseo 的语言（English、한국어、日本語、简体中文）。团队的智能体语言可以设为中文或英文，决定提示词、工具文字和智能体回复所用的语言。

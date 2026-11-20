@@ -61,7 +61,7 @@ export const teamReconnectRpc = defineRpc({
   ]),
 });
 
-/** For the agent dashboard: the teams of a workspace's project, with their team workspace resolved to an id. */
+/** For the session dashboard: the teams of a workspace's project, with their team workspace resolved to an id. */
 export const teamRosterRpc = defineRpc({
   name: "team.roster",
   input: z.object({ workspaceId: z.string() }),
