@@ -13,8 +13,9 @@ import { plannerWorkspace, teamWorkspaceId, type ProjectRef } from "../shared/pr
 import type { teamSaveRpc, teamPresetStartRpc, teamApplyRpc, teamDeleteRpc, teamInstructionsImproveRpc, teamInstructionsProposalRpc, teamPendingProposalRpc, teamProjectsRpc, teamProposalCancelRpc, teamProposalRpc, teamProposeRpc, teamReadRpc, teamReconnectRpc, teamRestartOrchestratorRpc, teamRestoreRpc, teamEditProposalRpc, teamEditProposeRpc, teamRosterRpc } from "../shared/rpc";
 import { checkTeam, serializeTeam, type Team } from "../shared/team";
 import { sameTeamFiles, teamFileFor, teamFileWorkspaces, teamIn, workspaceOwnerOf, workspaceClashes, workspacesOfOtherTeams } from "../shared/team-files";
-import { catalogFrom, agentModeOf, type AgentFeatures, validateTeam, type ProviderEntry } from "../shared/validate";
-import { allProjects, featuresFor, projectOf, projectTeams, providerEntries, teamToolsEnabled, TOOLS_OFF_ERROR, writeFileAtomic, type PaseoApi, type Target } from "./common";
+import { catalogFrom, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
+import { allProjects, projectOf, projectTeams, providerEntries, teamToolsEnabled, TOOLS_OFF_ERROR, writeFileAtomic, type PaseoApi, type Target } from "./common";
+import { leadUnattended, UNATTENDED_LABEL } from "../shared/draft-lead";
 
 /** The workspace to start the planner in: the given one, else one of the project's, else a new "Team planner". */
 async function plannerWorkspaceOf(paseo: PaseoApi, target: Target): Promise<string> {
@@ -161,9 +162,9 @@ export async function proposeTeam({ goal, locale, ...target }: RpcInput<typeof t
   await archivePlannersFor(paseo, target).catch(() => undefined);
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
-  const featureValues = await featuresFor(paseo, entries, provider, (await projectOf(paseo, target)).root);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!), ...(featureValues ? { featureValues } : {}) },
+    // A planner only reads the project: its provider's reviewed auto mode, else its default mode, never an unattended one.
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
     title: "Team planner",
     prompt: plannerPrompt(goal, catalogFrom(entries), languageFromLocale(locale)),
     outputSchema: TEAM_JSON_SCHEMA,
@@ -201,9 +202,9 @@ export async function teamProposal({ agentId }: RpcInput<typeof teamProposalRpc>
 export async function proposeTeamEdit({ request, team, locale, ...target }: RpcInput<typeof teamEditProposeRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamEditProposeRpc>> {
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
-  const featureValues = await featuresFor(paseo, entries, provider, (await projectOf(paseo, target)).root);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!), ...(featureValues ? { featureValues } : {}) },
+    // A planner only reads the project: its provider's reviewed auto mode, else its default mode, never an unattended one.
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
     title: "Team editor",
     prompt: teamEditPrompt(request, team, catalogFrom(entries), team.language ?? languageFromLocale(locale)),
     outputSchema: TEAM_JSON_SCHEMA,
@@ -224,9 +225,9 @@ export async function teamEditProposal({ agentId }: RpcInput<typeof teamEditProp
 export async function improveInstructions({ role, request, team, locale, ...target }: RpcInput<typeof teamInstructionsImproveRpc>, { paseo }: PluginHandlerContext): Promise<RpcOutput<typeof teamInstructionsImproveRpc>> {
   const entries = await providerEntries(paseo);
   const provider = plannerProvider(entries);
-  const featureValues = await featuresFor(paseo, entries, provider, (await projectOf(paseo, target)).root);
   const agent = await paseo.workspaces.ref(await plannerWorkspaceOf(paseo, target)).agents.create({
-    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!), ...(featureValues ? { featureValues } : {}) },
+    // A planner only reads the project: its provider's reviewed auto mode, else its default mode, never an unattended one.
+    config: { provider, modeId: agentModeOf(entries, provider.split("/")[0]!) },
     title: "Instructions planner",
     prompt: instructionsPrompt(role, request, team, languageFromLocale(locale)),
     outputSchema: INSTRUCTIONS_JSON_SCHEMA,
@@ -288,13 +289,14 @@ export async function allowTeamTools(project: ProjectRef, rules: readonly string
  * Starts the team's lead with the same configuration for apply and restart; the plugin starts members through its tools.
  * With a request, the lead starts on it as the user's first message instead of introducing the team.
  */
-async function startOrchestrator(paseo: PaseoApi, workspaceId: string, team: Team, orchestratorMode: ReturnType<typeof agentModeOf>, relative: string, featureValues: AgentFeatures, request = "") {
+async function startOrchestrator(paseo: PaseoApi, workspaceId: string, team: Team, orchestratorMode: ReturnType<typeof agentModeOf>, relative: string, unattended: boolean, request = "") {
   const prompts = promptsFor(team.language);
   return paseo.workspaces.ref(workspaceId).agents.create({
-    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: orchestratorMode, ...(featureValues ? { featureValues } : {}), systemPrompt: prompts.orchestratorPrompt(team, relative) },
+    // The lead's provider's reviewed auto mode, else its default mode. `unattended` is the person's choice for the members.
+    config: { provider: `${team.orchestrator.provider}/${team.orchestrator.model}`, modeId: orchestratorMode, systemPrompt: prompts.orchestratorPrompt(team, relative) },
     title: "Orchestrator",
     prompt: request.trim() || prompts.orchestratorReadyPrompt(relative),
-    labels: { [LABEL]: "orchestrator", [LANGUAGE_LABEL]: team.language ?? "en" },
+    labels: { [LABEL]: "orchestrator", [LANGUAGE_LABEL]: team.language ?? "en", ...(unattended ? { [UNATTENDED_LABEL]: "on" } : {}) },
   });
 }
 
@@ -315,17 +317,18 @@ export async function restartOrchestrator(target: RpcInput<typeof teamRestartOrc
   const { entries } = await paseo.workspaces.list();
   const workspaceId = teamWorkspaceId(entries, project.id, team.orchestrator.workspace);
   if (!workspaceId) return { ok: false, errors: [`Workspace ${team.orchestrator.workspace} was not found.`] };
-  const featureValues = await featuresFor(paseo, providers, `${team.orchestrator.provider}/${team.orchestrator.model}`, project.root);
   const permission = await allowTeamTools(project, claudeToolRules(team));
   if (!permission.ok) return { ok: false, errors: permission.errors };
   const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent);
   const archived = orchestratorsToArchive(agents, workspaceId);
+  // A reset session goes on as the person started it: members work without asking only if they chose that then.
+  const unattended = agents.some((agent) => archived.includes(agent.id) && leadUnattended(agent));
   const failures: string[] = [];
   for (const id of archived) {
     await paseo.agents.ref(id).archive().catch((error: unknown) => failures.push(`orchestrator ${id}: ${String(error)}`));
   }
   if (failures.length) return { ok: false, errors: failures };
-  const orchestrator = await startOrchestrator(paseo, workspaceId, team, agentModeOf(providers, team.orchestrator.provider), file, featureValues);
+  const orchestrator = await startOrchestrator(paseo, workspaceId, team, agentModeOf(providers, team.orchestrator.provider), file, unattended);
   return { ok: true, orchestratorAgentId: orchestrator.id, archived };
 }
 
@@ -353,7 +356,7 @@ export async function restoreTeam({ projectId, file, locale }: RpcInput<typeof t
   return applyTeam({ projectId, team: saved.team, locale }, ctx);
 }
 
-export async function applyTeam({ team: input, locale, request, mode: _mode, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext, options: { request?: string } = {}): Promise<RpcOutput<typeof teamApplyRpc>> {
+export async function applyTeam({ team: input, locale, request, mode: _mode, unattended = false, ...target }: RpcInput<typeof teamApplyRpc>, { paseo }: PluginHandlerContext, options: { request?: string } = {}): Promise<RpcOutput<typeof teamApplyRpc>> {
   options = { ...options, request: options.request ?? request };
   const checked = checkTeam(input);
   if (!checked.ok) return { ok: false, errors: checked.errors };
@@ -369,7 +372,6 @@ export async function applyTeam({ team: input, locale, request, mode: _mode, ...
   // Teams never share a workspace, so one team's role sessions can't mix with another's.
   const clashes = workspaceClashes(team, workspacesOfOtherTeams(teams, team.orchestrator.workspace));
   if (clashes.length) return { ok: false, errors: clashes.map((problem) => `${problem.target}: ${problem.message}`) };
-  const featureValues = await featuresFor(paseo, providers, `${team.orchestrator.provider}/${team.orchestrator.model}`, project.root);
   const permission = await allowTeamTools(project, claudeToolRules(team));
   if (!permission.ok) return { ok: false, errors: permission.errors };
   const relative = teamFileFor(team, teams, names);
@@ -391,7 +393,7 @@ export async function applyTeam({ team: input, locale, request, mode: _mode, ...
     await paseo.agents.ref(running.id).send(request ? `${changed}\n\n${team.language === "zh" ? "用户的新需求：" : "The user's new request:"}\n${request}` : changed);
     return { ok: true, file, workspaces, orchestratorAgentId: running.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)), permission: permission.file };
   }
-  const orchestrator = await startOrchestrator(paseo, lead.id, team, orchestratorMode, relative, featureValues, options.request);
+  const orchestrator = await startOrchestrator(paseo, lead.id, team, orchestratorMode, relative, unattended, options.request);
   return { ok: true, file, workspaces, orchestratorAgentId: orchestrator.id, cleanup: await archivePlanners(paseo, plannerCleanup(existing, agents, team)), permission: permission.file };
 }
 
@@ -418,7 +420,7 @@ export async function startFromPreset(input: RpcInput<typeof teamPresetStartRpc>
     title = freeWorkspace(input.workspace.title.trim() || taskWorkspaceTitle(input.request, preset.name), [...live.map(workspaceLabel), ...teams.flatMap(teamFileWorkspaces)]);
   }
   const team = presetToTeam(preset, title, { goal: input.request.trim().split("\n")[0]?.slice(0, 200), mode: input.mode });
-  const applied = await applyTeam({ projectId: project.id, team, locale: input.locale }, ctx, { request: input.request });
+  const applied = await applyTeam({ projectId: project.id, team, locale: input.locale, unattended: input.unattended === true }, ctx, { request: input.request });
   if (!applied.ok) return applied;
   return { ok: true, file: applied.file, workspaceId: applied.workspaces[0]!.id, orchestratorAgentId: applied.orchestratorAgentId, permission: applied.permission };
 }

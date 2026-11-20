@@ -16,6 +16,8 @@ export const DraftTeamSchema = z.object({
   mode: z.enum(TEAM_MODES).optional(),
   /** The app language of the client the draft was written in, for a team without a language of its own. */
   locale: z.string().optional(),
+  /** The person picked "members work without asking" in the composer; unset: members ask first. */
+  unattended: z.boolean().optional(),
 });
 export type DraftTeam = z.output<typeof DraftTeamSchema>;
 
@@ -25,6 +27,8 @@ export const LeadMetaSchema = z.object({
   file: z.string().optional(),
   /** The lead has been given its full instructions (in its first team_status). */
   instructed: z.boolean().optional(),
+  /** Its members work without asking, as the person who started it chose. */
+  unattended: z.boolean().optional(),
 });
 export type LeadMeta = z.output<typeof LeadMetaSchema>;
 
@@ -47,10 +51,10 @@ export function draftChoiceValue(choice: DraftTeam | null): string {
   return choice.source === "preset" ? `preset:${choice.presetId}` : "workspace";
 }
 
-/** The metadata value for a composer choice, keeping the mode and locale already chosen; null clears it. */
+/** The metadata value for a composer choice, keeping the mode and member permissions already chosen; null clears it. */
 export function draftTeamFor(value: string, current: DraftTeam | null, locale: string): DraftTeam | null {
   if (value === "none") return null;
-  const mode = current?.mode ? { mode: current.mode } : {};
+  const mode = { ...(current?.mode ? { mode: current.mode } : {}), ...(current?.unattended ? { unattended: true } : {}) };
   if (value === "workspace") return { source: "workspace", ...mode, locale };
   if (value.startsWith("preset:") && value.length > "preset:".length) return { source: "preset", presetId: value.slice("preset:".length), ...mode, locale };
   return null;
@@ -59,4 +63,24 @@ export function draftTeamFor(value: string, current: DraftTeam | null, locale: s
 /** The language a draft lead starts in before its team is known: the preset's, else the client's. */
 export function draftLanguage(choice: DraftTeam, presetLanguage: PromptLanguage | undefined, fromLocale: (locale: string | undefined) => PromptLanguage): PromptLanguage {
   return presetLanguage ?? fromLocale(choice.locale);
+}
+
+/**
+ * Marks a lead, and the members it started, whose person let members work without asking: members then start in their
+ * provider's full-access mode and the plugin approves their tool requests. Without it they keep their permission prompts.
+ */
+export const UNATTENDED_LABEL = "ensemble-unattended";
+
+/** Whether the person who started this lead let its members work without asking: its label, or its draft's choice. */
+export function leadUnattended(agent: { labels?: Readonly<Record<string, string>> | null; metadata?: Metadata }): boolean {
+  return agent.labels?.[UNATTENDED_LABEL] === "on" || leadMetaOf(agent.metadata)?.unattended === true || draftTeamOf(agent.metadata)?.unattended === true;
+}
+
+/**
+ * Whether a record carries the signals that answer {@link leadUnattended} by itself: labels (which are absent from the
+ * agent a team tool runs for) or a draft lead's metadata. Without them the record says nothing either way, and the
+ * lead's own record has to be read.
+ */
+export function recordSaysUnattended(agent: { labels?: Readonly<Record<string, string>> | null; metadata?: Metadata }): boolean {
+  return agent.labels !== undefined || leadMetaOf(agent.metadata) !== null;
 }

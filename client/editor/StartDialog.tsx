@@ -9,6 +9,7 @@ import { taskWorkspaceTitle } from "../../shared/presets";
 import type { Team } from "../../shared/team";
 import { Button, Callout, Segmented, type Kit } from "../kit";
 import { useT } from "./common";
+import { UnattendedChoice } from "../unattended";
 import { Slot, TextField } from "./controls";
 import { languageOptions, Radio, type LanguageChoice } from "./sections";
 import type { Check } from "./validate";
@@ -22,6 +23,8 @@ export interface StartChoice {
   title: string;
   mode: TeamMode;
   language: LanguageChoice;
+  /** The person lets members work without asking. */
+  unattended: boolean;
 }
 
 function WhereOption({ k, icon, title, sub, on, onPress }: { k: Kit; icon: string; title: string; sub: string; on: boolean; onPress(): void }) {
@@ -54,6 +57,8 @@ export function StartDialog({ k, open, team, check, here, project, toolsOff, bus
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState<TeamMode>(team.mode);
   const [language, setLanguage] = useState<LanguageChoice>(team.language ?? "auto");
+  // Off every time the dialog opens: members work without asking only when the person ticks it for this start.
+  const [unattended, setUnattended] = useState(false);
   useEffect(() => {
     if (!open) return;
     setRequest("");
@@ -61,12 +66,13 @@ export function StartDialog({ k, open, team, check, here, project, toolsOff, bus
     setTitle("");
     setMode(team.mode);
     setLanguage(team.language ?? "auto");
+    setUnattended(false);
   }, [open]);
   const name = team.orchestrator.workspace.trim() || t("editorUi.untitled");
   // Like Apply before it, a team with any problem (schema, provider catalog, another team's workspace) doesn't start.
   const ready = !!check.team && check.errors === 0 && !busy && !toolsOff;
   const start = () => {
-    if (ready) onStart({ request, where, title, mode, language });
+    if (ready) onStart({ request, where, title, mode, language, unattended });
   };
   return (
     <Modal title={t("editorUi.start")} open={open} onOpenChange={(next) => { if (!next && !busy) onClose(); }}>
@@ -113,6 +119,7 @@ export function StartDialog({ k, open, team, check, here, project, toolsOff, bus
           <Slot k={k} label={t("editorUi.startModal.language")} hint={t("editorUi.startModal.languageNote")}>
             <Segmented<LanguageChoice> k={k} stretch value={language} options={languageOptions(t)} onChange={setLanguage} />
           </Slot>
+          <UnattendedChoice k={k} value={unattended} onChange={setUnattended} />
 
           {errors.length ? (
             <Callout k={k} tone={k.c.bad} icon="CircleAlert">

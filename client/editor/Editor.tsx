@@ -46,7 +46,7 @@ export type TeamEditorProps = Pick<PluginScreenProps, "theme" | "layout" | "navi
   where?: ReactNode;
 };
 
-type ApplyInput = { target: Target; team: Team; request?: string; mode?: TeamMode; source: "dialog" | "again"; where: Where };
+type ApplyInput = { target: Target; team: Team; request?: string; mode?: TeamMode; unattended?: boolean; source: "dialog" | "again"; where: Where };
 type EditNotice = { summary: ReturnType<SummarizeEdit>; validation: Extract<RpcOutput<EditProposalRpc>, { status: "done" }>["validation"] };
 
 /** The team as the schema reads it (defaults applied, candidate handles filled), so drafts and files compare alike. */
@@ -269,7 +269,7 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied, tab, 
   });
 
   const applied = useMutation({
-    mutationFn: (input: ApplyInput) => apply({ ...input.target, team: input.team, locale, ...(input.request?.trim() ? { request: input.request.trim() } : {}), ...(input.mode ? { mode: input.mode } : {}) }),
+    mutationFn: (input: ApplyInput) => apply({ ...input.target, team: input.team, locale, ...(input.request?.trim() ? { request: input.request.trim() } : {}), ...(input.mode ? { mode: input.mode } : {}), ...(input.unattended ? { unattended: true } : {}) }),
     onSuccess: (outcome, input) => {
       invalidateTeams();
       void queryClient.invalidateQueries({ queryKey: ["dashboard", "agents"] });
@@ -313,9 +313,9 @@ export function TeamEditor({ theme, layout, navigation, target, onApplied, tab, 
     if (choice.where === "new") {
       const base = choice.title.trim() || taskWorkspaceTitle(choice.request, team.orchestrator.workspace);
       const workspace = freeWorkspace(base, [...titles, ...data.takenWorkspaces]);
-      applied.mutate({ target: { projectId: data.project.id }, team: { ...team, orchestrator: { ...team.orchestrator, workspace } }, request: choice.request, mode, source: "dialog", where: "new" });
+      applied.mutate({ target: { projectId: data.project.id }, team: { ...team, orchestrator: { ...team.orchestrator, workspace } }, request: choice.request, mode, unattended: choice.unattended, source: "dialog", where: "new" });
     } else {
-      applied.mutate({ target, team, request: choice.request, mode, source: "dialog", where: "here" });
+      applied.mutate({ target, team, request: choice.request, mode, unattended: choice.unattended, source: "dialog", where: "here" });
     }
   };
 

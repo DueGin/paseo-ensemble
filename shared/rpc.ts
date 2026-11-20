@@ -206,6 +206,8 @@ export const teamApplyRpc = defineRpc({
       request: z.string().optional(),
       /** This session's collaboration mode, when it differs from the team's. */
       mode: z.enum(TEAM_MODES).optional(),
+      /** The person lets members work without asking (full access); unset: members keep their permission prompts. */
+      unattended: z.boolean().optional(),
     }),
   ),
   output: z.discriminatedUnion("ok", [
@@ -327,6 +329,8 @@ export const teamSessionRpc = defineRpc({
     /** The mode auto settled on for the session; it can't be switched any more. */
     locked: z.enum(COLLAB_MODES).nullable(),
     effective: z.enum(TEAM_MODES).nullable(),
+    /** The person who started the session let its members work without asking. */
+    unattended: z.boolean(),
     run: RunViewSchema.nullable(),
     /** Roles the lead formed from candidate members in this session. */
     roles: z.array(z.object({ name: z.string(), candidate: z.string(), provider: z.string(), model: z.string() })),
@@ -423,6 +427,8 @@ export const teamPresetStartRpc = defineRpc({
     mode: z.enum(TEAM_MODES).optional(),
     /** The app language, for a preset without its own language. */
     locale: z.string().optional(),
+    /** The person lets members work without asking (full access); unset: members keep their permission prompts. */
+    unattended: z.boolean().optional(),
   }),
   output: z.discriminatedUnion("ok", [
     z.object({ ok: z.literal(false), errors: z.array(z.string()) }),

@@ -14,6 +14,7 @@ import { Badge, Button, Callout, Card, Field, Input, MODE_LOOK, PART, Segmented,
 import { parsedTeam, runtimeText, teamLabel, type WorkspaceTeam } from "./data";
 import type { Translate } from "./run-parts";
 import { LANGUAGE_NAMES } from "./preset-card";
+import { UnattendedChoice } from "../unattended";
 
 type Choice =
   | { key: string; kind: "file"; label: string; mode: TeamMode; lead: string; roles: number; candidates: number; file: string; team: Team; language: PromptLanguage | undefined }
@@ -52,6 +53,7 @@ export function StartTab({ k, t, workspaceId, workspace, presets, onStarted }: {
   const [title, setTitle] = useState("");
   const [mode, setMode] = useState(null as TeamMode | null);
   const [language, setLanguage] = useState<PromptLanguage | "auto">("auto");
+  const [unattended, setUnattended] = useState(false);
   const here = workspace.workspace ?? "";
   const own = useMemo(() => parsedTeam(workspace.team), [workspace.team]);
 
@@ -83,7 +85,7 @@ export function StartTab({ k, t, workspaceId, workspace, presets, onStarted }: {
           ...(language !== "auto" ? { language } : {}),
           ...(place === "new" ? { orchestrator: { ...choice.team.orchestrator, workspace: newTitle() } } : {}),
         };
-        const result = await apply({ workspaceId, team, locale, ...(firstRequest ? { request: firstRequest } : {}), ...(effectiveMode !== choice.team.mode ? { mode: effectiveMode } : {}) });
+        const result = await apply({ workspaceId, team, locale, ...(firstRequest ? { request: firstRequest } : {}), ...(effectiveMode !== choice.team.mode ? { mode: effectiveMode } : {}), ...(unattended ? { unattended: true } : {}) });
         return result.ok ? { ok: true, agentId: result.orchestratorAgentId, workspaceId: result.workspaces[0]?.id ?? workspaceId } : result;
       }
       const result = await startPreset({
@@ -94,6 +96,7 @@ export function StartTab({ k, t, workspaceId, workspace, presets, onStarted }: {
         ...(effectiveMode !== choice.preset.mode ? { mode: effectiveMode } : {}),
         // A preset without a language of its own takes it from the locale.
         locale: language === "auto" ? locale : language,
+        ...(unattended ? { unattended: true } : {}),
       });
       return result.ok ? { ok: true, agentId: result.orchestratorAgentId, workspaceId: result.workspaceId } : result;
     },
@@ -174,6 +177,8 @@ export function StartTab({ k, t, workspaceId, workspace, presets, onStarted }: {
         />
         {fixedLanguage ? <T k={k} v="tiny">{t("sideUi.start.languageFixed")}</T> : null}
       </Field>
+
+      <UnattendedChoice k={k} value={unattended} onChange={setUnattended} />
 
       {errors.length ? (
         <Callout k={k} tone={k.c.bad} icon="TriangleAlert">

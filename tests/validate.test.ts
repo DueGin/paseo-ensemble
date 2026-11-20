@@ -95,12 +95,9 @@ describe("agentModeOf", () => {
     expect(agentModeOf(entries, "codex")).toBe("auto-review");
   });
 
-  it("falls back to the isUnattended mode", () => {
-    expect(agentModeOf(entries, "antigravity")).toBe("full-access");
-  });
-
-  it("falls back to the dangerous colorTier mode", () => {
-    expect(agentModeOf(entries, "copilot")).toBe("bypassPermissions");
+  it("never picks an unattended or dangerous mode, so such a provider keeps its default", () => {
+    expect(agentModeOf(entries, "antigravity")).toBeUndefined();
+    expect(agentModeOf(entries, "copilot")).toBeUndefined();
   });
 
   it("returns undefined when the provider has no modes or is unknown", () => {
@@ -161,8 +158,8 @@ describe("agentModeOf", () => {
       expect(agentModeOf(mixed([{ id: "default" }, { id: "noauto", label: "Noauto" }]), "p")).toBeUndefined();
     });
 
-    it("prefers isUnattended over a different dangerous mode", () => {
-      expect(agentModeOf(mixed([{ id: "risky", colorTier: "dangerous" }, { id: "chosen", isUnattended: true, colorTier: "moderate" }]), "p")).toBe("chosen");
+    it("leaves a provider with only unattended or dangerous modes on its default", () => {
+      expect(agentModeOf(mixed([{ id: "risky", colorTier: "dangerous" }, { id: "free", isUnattended: true, colorTier: "moderate" }]), "p")).toBeUndefined();
     });
   });
 });
@@ -179,7 +176,7 @@ describe("agentModeOf on this host's live snapshot", () => {
     ["claude", "auto"],
     ["codex", "auto-review"],
     ["opencode", undefined],
-    ["antigravity", "full-access"],
+    ["antigravity", undefined],
   ])("%s -> %s", (provider, mode) => {
     expect(agentModeOf(live, provider)).toBe(mode);
   });
@@ -187,7 +184,7 @@ describe("agentModeOf on this host's live snapshot", () => {
 
 describe("roleModes", () => {
   it("maps each role name to its provider's agent mode", () => {
-    expect(roleModes(team, entries)).toEqual({ design: "auto-review", sound: "full-access" });
+    expect(roleModes(team, entries)).toEqual({ design: "auto-review", sound: undefined });
   });
 
   it("maps a cursor role to auto when cursor offers it", () => {

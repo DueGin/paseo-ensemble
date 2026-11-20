@@ -23,25 +23,23 @@ export interface TeamError {
 }
 
 /**
- * The mode new agents start in instead of the provider's default; first match wins: `auto-review`, `auto`, an id or label
- * with a word starting with `auto`, then `isUnattended`, then `dangerous` (claude and codex snapshots carry only `colorTier`).
- * `auto-review` precedes `auto` because Codex's `auto` id is Default Permissions, which prompts, while Claude's `auto`
- * and Codex's `auto-review` both auto-review approvals.
+ * The mode the orchestrator and the planners start in instead of the provider's default: its reviewed auto mode, first
+ * match wins: `auto-review`, `auto`, then an id or label with a word starting with `auto`. `auto-review` precedes `auto`
+ * because Codex's `auto` id is Default Permissions, which prompts, while Claude's `auto` and Codex's `auto-review` both
+ * send approvals to a reviewer. A provider without one keeps its default mode: nothing starts unattended unasked.
  */
 export function agentModeOf(entries: readonly ProviderEntry[], provider: string): string | undefined {
   const modes = entries.find((entry) => entry.provider === provider)?.modes ?? [];
   return (
     modes.find((mode) => mode.id === "auto-review") ??
     modes.find((mode) => mode.id === "auto") ??
-    modes.find((mode) => /(^|[^a-z])auto/i.test(mode.id) || /(^|[^a-z])auto/i.test(mode.label ?? "")) ??
-    modes.find((mode) => mode.isUnattended === true) ??
-    modes.find((mode) => mode.colorTier === "dangerous")
+    modes.find((mode) => /(^|[^a-z])auto/i.test(mode.id) || /(^|[^a-z])auto/i.test(mode.label ?? ""))
   )?.id;
 }
 
 /**
- * A member's mode: its provider's full-access one (Claude's Bypass, Codex's Full Access), so work delegated to it never
- * stops on a permission prompt; else the mode a lead gets.
+ * A member's mode when the person starting the team let members work without asking: its provider's full-access one
+ * (Claude's Bypass, Codex's Full Access), so delegated work never stops on a permission prompt; else the mode a lead gets.
  */
 export function memberModeOf(entries: readonly ProviderEntry[], provider: string): string | undefined {
   const modes = entries.find((entry) => entry.provider === provider)?.modes ?? [];

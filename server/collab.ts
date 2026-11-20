@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { workspaceLabel } from "../shared/apply-plan";
 import { agentJob, agentLanguage, LABEL } from "../shared/cleanup";
-import { draftTeamOf, LEAD_META, leadMetaOf, type LeadMeta } from "../shared/draft-lead";
+import { draftTeamOf, LEAD_META, leadMetaOf, leadUnattended, recordSaysUnattended, UNATTENDED_LABEL, type LeadMeta } from "../shared/draft-lead";
 import {
   addBatch, addPost, addTasks, assignTasks, attachPacket, batchToSummarize, summarizeBatch, boardPage, briefPosition, briefText, claimPaths, claimTask, completeTask, confirmsBrief, conversationFrom, createRun, DEFAULT_TEAM_ROUNDS,
   excerpt, finishMember, inboxOf, inboxText, leadInbox, markCollected, markInbox, markPlansNotified, MAX_NUDGES, MAX_ROUNDS, MAX_TEAM_SIZE,
@@ -318,12 +318,14 @@ interface LeadContext {
   effective: TeamMode;
   /** Roles the lead formed from candidates in this session. */
   sessionRoles: SessionRole[];
+  /** The person who started the lead let its members work without asking; otherwise they keep their permission prompts. */
+  unattended: boolean;
 }
 
 /** The team file of each lead started from a new-agent draft, by lead id; such a lead's team is its own file, not the workspace title's. */
 const draftLeadFiles = new Map<string, string>();
 
-async function leadContext(paseo: PaseoApi, lead: { id: string; workspaceId: string | null; metadata?: Readonly<Record<string, unknown>> | null }): Promise<LeadContext> {
+async function leadContext(paseo: PaseoApi, lead: { id: string; workspaceId: string | null; metadata?: Readonly<Record<string, unknown>> | null; labels?: Readonly<Record<string, string>> | null }): Promise<LeadContext> {
   const { entries } = await paseo.workspaces.list();
   const workspace = entries.find((entry) => entry.id === lead.workspaceId);
   if (!workspace) throw new Error("Your workspace was not found in Paseo.");
@@ -347,7 +349,11 @@ async function leadContext(paseo: PaseoApi, lead: { id: string; workspaceId: str
   const override = store.sessionMode(project.root, lead.id);
   const locked = store.sessionLock(project.root, lead.id);
   const sessionRoles = own.team.candidates.length ? await store.sessionRoles(project.root, lead.id) : [];
-  return { project, workspaceId: workspace.id, workspaceTitle: title, team: own.team, file: own.file, override, locked, effective: effectiveMode(own.team.mode, override, locked), sessionRoles };
+  // The agent a team tool runs for carries no labels and empty metadata; a context built from a run has no record at all.
+  // Either way the lead's own record says whether its members may work without asking, so fetch it unless the record
+  // itself already tells.
+  const record = recordSaysUnattended(lead) ? lead : ((await agentStatus(paseo, lead.id)) ?? lead);
+  return { project, workspaceId: workspace.id, workspaceTitle: title, team: own.team, file: own.file, override, locked, effective: effectiveMode(own.team.mode, override, locked), sessionRoles, unattended: leadUnattended(record) };
 }
 
 interface MemberSpec extends RoleNote {
@@ -412,7 +418,7 @@ const parentOf = (agent: AgentLike) => agent.parentAgentId ?? agent.labels[PAREN
 async function reusableMember(paseo: PaseoApi, ctx: LeadContext, leadId: string, spec: MemberSpec, lang: PromptLanguage): Promise<AgentLike | "busy" | null> {
   const agents = (await paseo.agents.list()).entries.map((entry) => entry.agent as unknown as AgentLike);
   const candidates = agents
-    .filter((agent) => !agent.archivedAt && agent.workspaceId === ctx.workspaceId && agentJob(agent) === "member" && key(agent.labels.role ?? "") === key(spec.name) && agent.provider === spec.provider && agent.model === spec.model && (agent.labels[LANGUAGE_LABEL] ?? "en") === lang)
+    .filter((agent) => !agent.archivedAt && agent.workspaceId === ctx.workspaceId && agentJob(agent) === "member" && key(agent.labels.role ?? "") === key(spec.name) && agent.provider === spec.provider && agent.model === spec.model && (agent.labels[LANGUAGE_LABEL] ?? "en") === lang && (agent.labels[UNATTENDED_LABEL] === "on") === ctx.unattended)
     .sort((a, b) => Number(parentOf(b) === leadId) - Number(parentOf(a) === leadId) || b.createdAt.localeCompare(a.createdAt));
   const idle = candidates.find((agent) => agent.status !== "running" && agent.status !== "initializing" && agent.status !== "closed" && agent.status !== "error");
   if (idle) return idle;
@@ -433,16 +439,18 @@ async function dispatch(paseo: PaseoApi, ctx: LeadContext, leadId: string, spec:
     return { agentId: existing.id, title: current?.title ?? spec.name, continued: true };
   }
   const entries = await providerEntries(paseo);
-  const featureValues = await featuresFor(paseo, entries, `${spec.provider}/${spec.model}`, ctx.project.root);
+  // Members keep their provider's permission prompts unless the person who started the team let them work without asking.
+  const featureValues = ctx.unattended ? await featuresFor(paseo, entries, `${spec.provider}/${spec.model}`, ctx.project.root) : undefined;
   // A member is named after its role; a second one the lead still has gets a number.
   const mine = (await paseo.agents.list()).entries.map((entry) => entry.agent as unknown as AgentLike).filter((agent) => !agent.archivedAt && parentOf(agent) === leadId && agentJob(agent) === "member");
   const title = memberTitle(spec.name, mine.map((agent) => agent.title ?? ""));
   const agent = await paseo.workspaces.ref(ctx.workspaceId).agents.create({
-    // A member works for the lead unattended: its provider's full-access mode, so it never stops on a permission prompt.
-    config: { provider: `${spec.provider}/${spec.model}`, modeId: memberModeOf(entries, spec.provider), ...(featureValues ? { featureValues } : {}), systemPrompt: promptsFor(lang).memberSystemPrompt(ctx.team, spec) },
+    // Unattended (by the person's choice): the provider's full-access mode, so it never stops on a permission prompt.
+    // Otherwise the provider's default mode, which asks before running commands or editing files.
+    config: { provider: `${spec.provider}/${spec.model}`, ...(ctx.unattended ? { modeId: memberModeOf(entries, spec.provider) } : {}), ...(featureValues ? { featureValues } : {}), systemPrompt: promptsFor(lang).memberSystemPrompt(ctx.team, spec) },
     title,
     prompt,
-    labels: { role: spec.name, [LABEL]: "member", [LANGUAGE_LABEL]: lang },
+    labels: { role: spec.name, [LABEL]: "member", [LANGUAGE_LABEL]: lang, ...(ctx.unattended ? { [UNATTENDED_LABEL]: "on" } : {}) },
     parent: leadId,
   });
   await card(agent.id, title, false);
@@ -757,12 +765,10 @@ function startSweep(paseo: PaseoApi): void {
   sweeping.unref?.();
 }
 
-/** Whether an agent is a team member the plugin started (by its run, else its label), whatever run it is in now. */
-async function isMember(paseo: PaseoApi, agentId: string): Promise<boolean> {
-  await store.loadAll(paseo).catch(() => undefined);
-  if (store.memberRun(agentId)) return true;
+/** Whether an agent is a team member the plugin started for a person who let members work without asking. */
+async function unattendedMember(paseo: PaseoApi, agentId: string): Promise<boolean> {
   const agent = await agentStatus(paseo, agentId);
-  return agent ? agentJob(agent) === "member" : false;
+  return !!agent && agentJob(agent) === "member" && agent.labels[UNATTENDED_LABEL] === "on";
 }
 
 async function onAttention(paseo: PaseoApi, agentId: string, state: "attention" | "working"): Promise<void> {
@@ -1894,9 +1900,9 @@ export function contributeCollaboration(server: PluginServerContext, readPresets
     await onTurnEnded(paseo, agent.id, outcome.kind).catch((error) => console.error(`[ensemble] after turn of ${agent.id}`, error));
   });
   server.addHook("agent.permission.before", async ({ agent, request }, { paseo }) => {
-    // A member works unattended for the lead: a tool call it asks about is allowed at once (its full-access mode
-    // normally asks nothing). A question to the person, or a plan to approve, still waits for them.
-    if (request.kind === "tool" && (await isMember(paseo, agent.id))) {
+    // A member the person let work without asking: a tool call it asks about is allowed at once (its full-access mode
+    // normally asks nothing). Any other member's prompt, a question to the person or a plan to approve waits for them.
+    if (request.kind === "tool" && (await unattendedMember(paseo, agent.id))) {
       const allowed = await paseo.agents.ref(agent.id).respondToPermission({ requestId: request.id, response: { behavior: "allow" } }).then(() => true, (error) => (console.error(`[ensemble] could not allow ${request.name} for ${agent.id}`, error), false));
       if (allowed) return;
     }
@@ -2009,11 +2015,11 @@ export async function sessionDetail({ agentId }: RpcInput<typeof teamSessionDeta
 }
 
 export async function sessionInfo({ agentId }: RpcInput<typeof teamSessionRpc>, { paseo }: { paseo: PaseoApi }): Promise<RpcOutput<typeof teamSessionRpc>> {
-  const none = { leadAgentId: null, configured: null, override: null, locked: null, effective: null, run: null, roles: [], pendingBrief: null };
+  const none = { leadAgentId: null, configured: null, override: null, locked: null, effective: null, unattended: false, run: null, roles: [], pendingBrief: null };
   const lead = await leadOf(paseo, agentId);
   if (!lead) return none;
-  const ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null, metadata: lead.metadata }).catch(() => null);
-  if (!ctx) return { ...none, leadAgentId: lead.id };
+  const ctx = await leadContext(paseo, { id: lead.id, workspaceId: lead.workspaceId ?? null, metadata: lead.metadata, labels: lead.labels }).catch(() => null);
+  if (!ctx) return { ...none, leadAgentId: lead.id, unattended: leadUnattended(lead) };
   const run = store.leadRun(lead.id, false);
   const pending = await store.pendingBrief(ctx.project.root, lead.id);
   return {
@@ -2023,6 +2029,7 @@ export async function sessionInfo({ agentId }: RpcInput<typeof teamSessionRpc>, 
     override: ctx.override,
     locked: ctx.locked,
     effective: ctx.effective,
+    unattended: ctx.unattended,
     run: run ? runView(run) : null,
     roles: ctx.sessionRoles.map((role) => ({ name: role.name, candidate: role.candidate, provider: role.provider, model: role.model })),
   };

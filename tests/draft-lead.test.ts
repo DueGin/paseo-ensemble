@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { draftCreateRequest, prepareDraftLead } from "../server/draft";
 import { agentJob, agentLanguage, findOrchestrator, LABEL } from "../shared/cleanup";
-import { DRAFT_TEAM, draftChoiceValue, draftTeamFor, draftTeamOf, LEAD_META, leadMetaOf } from "../shared/draft-lead";
+import { DRAFT_TEAM, draftChoiceValue, draftTeamFor, draftTeamOf, LEAD_META, leadMetaOf, leadUnattended, recordSaysUnattended, UNATTENDED_LABEL } from "../shared/draft-lead";
 import type { Preset } from "../shared/presets";
 import { parseTeam, serializeTeam } from "../shared/team";
 import { TEAMS_DIR } from "../shared/team-files";
@@ -49,6 +49,34 @@ describe("the draft's team choice", () => {
     // A running draft lead is reused on Apply like a labelled one.
     const lead = { id: "a1", workspaceId: "w", labels: {}, metadata: { [LEAD_META]: { language: "en" } }, provider: "claude", model: "m" };
     expect(findOrchestrator([lead], "w", { version: 1, goal: "", mode: "auto", orchestrator: { workspace: "x", provider: "claude", model: "m" }, roles: [], candidates: [{ name: "c", provider: "claude", model: "m", notes: "" }] }, undefined)?.id).toBe("a1");
+  });
+});
+
+describe("whether members may work without asking", () => {
+  it("is off unless the person who started the lead turned it on", () => {
+    expect(leadUnattended({ labels: {}, metadata: null })).toBe(false);
+    expect(leadUnattended({ labels: { [UNATTENDED_LABEL]: "on" } })).toBe(true);
+    expect(leadUnattended({ labels: {}, metadata: { [LEAD_META]: { language: "en", unattended: true } } })).toBe(true);
+    // A draft lead knows it from its composer choice until its lead record is written.
+    expect(leadUnattended({ labels: {}, metadata: { [DRAFT_TEAM]: { source: "workspace", unattended: true } } })).toBe(true);
+    expect(leadUnattended({ labels: { [UNATTENDED_LABEL]: "yes" }, metadata: { [DRAFT_TEAM]: { source: "workspace" } } })).toBe(false);
+  });
+
+  it("is kept when the draft's team changes", () => {
+    expect(draftTeamFor("preset:p-1", { source: "workspace", unattended: true }, "en")).toEqual({ source: "preset", presetId: "p-1", unattended: true, locale: "en" });
+    expect(draftTeamFor("workspace", { source: "workspace" }, "en")).toEqual({ source: "workspace", locale: "en" });
+  });
+
+  it("is read from the lead's own record when the caller's copy does not say", () => {
+    // The agent a team tool runs for: no labels, empty metadata. Neither says whether the person chose it.
+    expect(recordSaysUnattended({ labels: undefined, metadata: {} })).toBe(false);
+    expect(recordSaysUnattended({})).toBe(false);
+    // A record with labels, even without the marker, says no; so does a draft lead's metadata.
+    expect(recordSaysUnattended({ labels: {}, metadata: {} })).toBe(true);
+    expect(recordSaysUnattended({ labels: { [UNATTENDED_LABEL]: "on" } })).toBe(true);
+    expect(recordSaysUnattended({ labels: undefined, metadata: { [LEAD_META]: { language: "en", unattended: true } } })).toBe(true);
+    // The composer's draft choice alone is not the lead's record: it becomes one when the lead is set up.
+    expect(recordSaysUnattended({ labels: undefined, metadata: { [DRAFT_TEAM]: { source: "workspace", unattended: true } } })).toBe(false);
   });
 });
 

@@ -68,13 +68,39 @@ function DraftModeSelect() {
   );
 }
 
+/** Whether the members of a draft that leads a team work without asking; they ask first unless the person picks otherwise. */
+function DraftUnattendedSelect() {
+  const composer = useComposer();
+  const { t } = useTranslation(messages);
+  if (composer.context === "agent") return null;
+  const choice = draftTeamOf(composer.agent.metadata);
+  if (!choice) return null;
+  return (
+    <Select
+      title={t("unattended.draftTitle")}
+      icon={choice.unattended ? "ShieldAlert" : "ShieldCheck"}
+      value={choice.unattended ? "on" : "ask"}
+      options={[
+        { value: "ask", label: t("unattended.draftAsk"), description: t("unattended.draftAskHint") },
+        { value: "on", label: t("unattended.draftOn"), description: t("unattended.draftOnHint") },
+      ]}
+      onValueChange={({ value }) => {
+        const { unattended: _old, ...rest } = choice;
+        return composer.setMetadata({ [DRAFT_TEAM]: value === "on" ? { ...rest, unattended: true } : rest });
+      }}
+    />
+  );
+}
+
 export function contributeDraftTeam(client: PluginClientContext): () => void {
   // Apps older than 0.16 have no composer items.
   if (typeof client.addComposerItem !== "function") return () => {};
   const removeTeam = client.addComposerItem({ id: "team", Component: DraftTeamSelect });
   const removeMode = client.addComposerItem({ id: "team-mode", Component: DraftModeSelect });
+  const removeUnattended = client.addComposerItem({ id: "team-members", Component: DraftUnattendedSelect });
   return () => {
     removeTeam();
     removeMode();
+    removeUnattended();
   };
 }

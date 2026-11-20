@@ -32,7 +32,7 @@ export function draftCreateRequest(request: CreateRequest, presets: readonly Pre
   const preset = choice.source === "preset" ? presets.find((entry) => entry.id === choice.presetId) : undefined;
   const lang = draftLanguage(choice, preset?.language, languageFromLocale);
   if (choice.source === "preset" && !preset) throw new Error(say(lang, "The team preset picked for this agent no longer exists. Pick another team in the composer.", "为这个 agent 选择的团队预设已不存在，请在输入框里重新选择团队。"));
-  const lead: LeadMeta = { language: lang };
+  const lead: LeadMeta = { language: lang, ...(choice.unattended ? { unattended: true } : {}) };
   const own = request.config.systemPrompt?.trim();
   return {
     ...request,
@@ -88,5 +88,5 @@ export async function prepareDraftLead(paseo: PaseoApi, request: OpenRequest, pr
   const permission = await allowTeamTools({ id: workspace.projectId, name: workspace.projectDisplayName, root }, claudeToolRules(team));
   if (!permission.ok) throw new Error(permission.errors.join("\n"));
   const mode = choice.mode && choice.mode !== team.mode ? choice.mode : null;
-  return { root, file, team, lead: { language: team.language ?? lang, file }, mode };
+  return { root, file, team, lead: { language: team.language ?? lang, file, ...(choice.unattended ? { unattended: true } : {}) }, mode };
 }

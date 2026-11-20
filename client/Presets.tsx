@@ -12,6 +12,7 @@ import { languageFromLocale, PROMPT_LANGUAGES, TEAM_MODES, type TeamMode } from 
 import { namedCandidates, newPresetId, presetProblems, presetsSettings, presetToTeam, taskWorkspaceTitle, type Preset } from "../shared/presets";
 import { teamLegacyPresetsRpc, teamPresetStartRpc } from "../shared/rpc";
 import { catalogFrom, validateTeam, type ProviderEntry, type ProviderInfo } from "../shared/validate";
+import { UnattendedChoice } from "./unattended";
 import { messages } from "./i18n";
 import { Badge, Button, Callout, Card, Chip, Empty, Field, Input, makeKit, MODE_LOOK, PART, SectionHeader, Segmented, Spinner, T, Tile, type Kit } from "./kit";
 import { copyWorkspace, freeWorkspaces, relativeTo, runtimeText, type ProjectTeams as Project } from "./side/data";
@@ -252,6 +253,7 @@ export function StartFromPresetDialog({ colors, compact = false, project, preset
   const [request, setRequest] = useState("");
   const [workspaceId, setWorkspaceId] = useState(null as string | null);
   const [title, setTitle] = useState("");
+  const [unattended, setUnattended] = useState(false);
   const preset = presets.find((entry) => entry.id === presetId) ?? null;
   useEffect(() => {
     // A fresh dialog for each project; the first preset is picked, with its own mode.
@@ -261,9 +263,10 @@ export function StartFromPresetDialog({ colors, compact = false, project, preset
     setRequest("");
     setWorkspaceId(null);
     setTitle("");
+    setUnattended(false);
   }, [project?.id]);
   const started = useMutation({
-    mutationFn: () => start({ projectId: project!.id, presetId: presetId!, request, mode, locale, workspace: workspaceId ? { workspaceId } : { title } }),
+    mutationFn: () => start({ projectId: project!.id, presetId: presetId!, request, mode, locale, workspace: workspaceId ? { workspaceId } : { title }, ...(unattended ? { unattended: true } : {}) }),
     onSuccess: (result) => {
       if (result.ok) onStarted(result);
     },
@@ -315,6 +318,7 @@ export function StartFromPresetDialog({ colors, compact = false, project, preset
                 </View>
               ) : null}
             </Field>
+            <UnattendedChoice k={k} value={unattended} onChange={setUnattended} />
             {errors.length ? (
               <Callout k={k} tone={k.c.bad} icon="TriangleAlert">
                 {errors.map((error) => (

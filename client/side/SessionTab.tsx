@@ -198,6 +198,10 @@ export function SessionTab({ k, t, workspace, leads, agents, icons, selected, on
           </View>
         </View>
         {info?.leadAgentId && info.effective ? <ModeSwitch k={k} t={t} leadAgentId={info.leadAgentId} info={{ configured: info.configured, override: info.override, locked: info.locked, effective: info.effective }} /> : session.isLoading ? <Spinner k={k} /> : null}
+        {info?.leadAgentId ? (
+          // What the person who started the session chose for the members' permissions; fixed for the session.
+          <Badge k={k} icon={info.unattended ? "ShieldAlert" : "ShieldCheck"} tone={info.unattended ? k.c.warn : undefined} label={t(info.unattended ? "unattended.badgeOn" : "unattended.badgeOff")} />
+        ) : null}
         {session.error ? (
           <T k={k} v="tiny" style={{ color: k.c.bad }}>
             {String(session.error)}
