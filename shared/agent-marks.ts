@@ -55,3 +55,22 @@ export function modelMark(model: string | null | undefined, provider = ""): Mark
   const own = (model ?? "").trim().split("/").pop() ?? "";
   return own ? letterOf(own) : null;
 }
+
+/** Whether the SVG defines ids (the gradients of the color marks), which each copy on a page must rename. */
+export function hasIds(svg: string): boolean {
+  return /\sid="[^"]+"/.test(svg);
+}
+
+/**
+ * The SVG with every id it defines renamed with `suffix`, and every reference to them (`url(#…)`, `href="#…"`) to
+ * match. An id names one element per page: a second copy of a gradient mark draws with the first copy's gradient, and
+ * draws nothing while that copy is hidden (Codex then shows as a blank tile). So each copy on screen needs its own ids.
+ */
+export function withIdSuffix(svg: string, suffix: string): string {
+  const ids = new Set([...svg.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]!));
+  if (!ids.size) return svg;
+  return svg
+    .replace(/(\sid=")([^"]+)"/g, (_all, head: string, id: string) => `${head}${id}${suffix}"`)
+    .replace(/url\(#([^)]+)\)/g, (all, id: string) => (ids.has(id) ? `url(#${id}${suffix})` : all))
+    .replace(/((?:xlink:)?href=")#([^"]+)"/g, (all, head: string, id: string) => (ids.has(id) ? `${head}#${id}${suffix}"` : all));
+}

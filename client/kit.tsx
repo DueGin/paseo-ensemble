@@ -5,9 +5,9 @@
 // that read on light and dark themes alike.
 import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/ui";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ActivityIndicator, Animated, Pressable, Text, TextInput, View, type StyleProp, type TextStyle, type ViewStyle } from "react-native";
-import { clientMark, modelMark, type Mark } from "../shared/agent-marks";
+import { clientMark, hasIds, modelMark, withIdSuffix, type Mark } from "../shared/agent-marks";
 import { withAlpha } from "../shared/color";
 
 /** The kit for one theme and layout: the colors and the shared styles. Make it once per surface with `useKit`. */
@@ -161,9 +161,35 @@ export function Tile({ k, icon, tone, size = 26, letter }: { k: Kit; icon?: stri
   );
 }
 
+/** Suffix numbers held by the gradient marks on screen; a number is reused once its mark unmounts. */
+const idSlots = new Set<number>();
+
+/**
+ * The SVG with ids of its own while this copy is mounted (see withIdSuffix), or null until it has them; an SVG without
+ * ids comes back as it is. Numbers are reused, so the host's icon cache, keyed by the SVG text, holds one entry per copy
+ * shown at once rather than one per mount.
+ */
+function useOwnIds(svg: string | null): string | null {
+  const needs = svg !== null && hasIds(svg);
+  const [slot, setSlot] = useState<number | null>(null);
+  useEffect(() => {
+    if (!needs) return;
+    let next = 0;
+    while (idSlots.has(next)) next += 1;
+    idSlots.add(next);
+    setSlot(next);
+    return () => {
+      idSlots.delete(next);
+    };
+  }, [needs]);
+  if (!needs) return svg;
+  return slot === null ? null : withIdSuffix(svg, `-e${slot}`);
+}
+
 /** A mark at `size`: its SVG (single-color marks take `color`), else its letter. */
 function MarkGlyph({ mark, size, color }: { mark: Mark; size: number; color: string }) {
-  if (mark.kind === "svg") return <Icon icon={{ svg: mark.svg }} size={size} color={color} />;
+  const svg = useOwnIds(mark.kind === "svg" ? mark.svg : null);
+  if (mark.kind === "svg") return svg ? <Icon icon={{ svg }} size={size} color={color} /> : <View style={{ width: size, height: size }} />;
   return <Text style={{ color, fontSize: Math.round(size * 0.82), lineHeight: Math.round(size * 1.05), fontWeight: "800" }}>{mark.letter}</Text>;
 }
 
