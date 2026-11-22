@@ -3,7 +3,7 @@
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import { defineAgentTool, type AgentToolDefinition, type AgentToolResult, type PluginServerContext } from "@getpaseo/plugin/server";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readdir, readFile, unlink } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { workspaceLabel } from "../shared/apply-plan";
@@ -30,7 +30,7 @@ import { teamIn } from "../shared/team-files";
 import { memberModeOf } from "../shared/validate";
 import { showHandoff, showUpdate } from "./cards";
 import { logEvents, traceRun, type FlowParty, type NewEvent } from "../shared/flow";
-import { allProjects, featuresFor, projectTeams, providerEntries, sleep, writeFileAtomic, type PaseoApi } from "./common";
+import { allProjects, featuresFor, projectTeams, providerEntries, removeProjectFile, sleep, writeProjectFile, type PaseoApi } from "./common";
 import { draftCreateRequest, prepareDraftLead } from "./draft";
 import type { Preset } from "../shared/presets";
 
@@ -129,7 +129,7 @@ class RunStore {
       }
     }
     const closed = loaded.filter((run) => run.status === "closed").sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    for (const run of closed.slice(KEEP_CLOSED_RUNS)) await unlink(join(dir, `${run.id}.json`)).catch(() => undefined);
+    for (const run of closed.slice(KEEP_CLOSED_RUNS)) await removeProjectFile(root, `${RUNS_DIR}/${run.id}.json`).catch(() => undefined);
     const dropped = new Set(closed.slice(KEEP_CLOSED_RUNS).map((run) => run.id));
     for (const run of loaded) if (!dropped.has(run.id) && !this.runs.has(run.id)) this.runs.set(run.id, { run, root });
     await this.readSessions(root);
@@ -221,13 +221,13 @@ class RunStore {
 
   private async save(id: string): Promise<void> {
     const entry = this.runs.get(id);
-    if (entry) await writeFileAtomic(join(entry.root, RUNS_DIR, `${id}.json`), JSON.stringify(entry.run, null, 2) + "\n");
+    if (entry) await writeProjectFile(entry.root, `${RUNS_DIR}/${id}.json`, JSON.stringify(entry.run, null, 2) + "\n");
   }
 
   private async ensureIgnored(root: string): Promise<void> {
     const file = join(root, RUNS_DIR, ".gitignore");
     const exists = await readFile(file, "utf8").then(() => true, () => false);
-    if (!exists) await writeFileAtomic(file, "# Collaboration runs of the Ensemble plugin for Paseo; local state, not shared.\n*\n");
+    if (!exists) await writeProjectFile(root, `${RUNS_DIR}/.gitignore`, "# Collaboration runs of the Ensemble plugin for Paseo; local state, not shared.\n*\n");
   }
 
   /** Records events no state change shows, such as a refused file claim. */
@@ -247,7 +247,7 @@ class RunStore {
     if (brief) briefs[leadAgentId] = brief;
     else delete briefs[leadAgentId];
     await this.ensureIgnored(root);
-    await writeFileAtomic(file, JSON.stringify(briefs, null, 2) + "\n");
+    await writeProjectFile(root, `${RUNS_DIR}/${BRIEFS_FILE}`, JSON.stringify(briefs, null, 2) + "\n");
   }
 
   private async readJson<T>(file: string, fallback: T): Promise<T> {
@@ -270,7 +270,7 @@ class RunStore {
     if (sessionRoles.length) roles[leadAgentId] = [...sessionRoles];
     else delete roles[leadAgentId];
     await this.ensureIgnored(root);
-    await writeFileAtomic(file, JSON.stringify(roles, null, 2) + "\n");
+    await writeProjectFile(root, `${RUNS_DIR}/${ROLES_FILE}`, JSON.stringify(roles, null, 2) + "\n");
   }
 
   sessionMode(root: string, leadAgentId: string): TeamMode | null {
@@ -289,7 +289,7 @@ class RunStore {
     else sessions[leadAgentId] = next;
     this.sessions.set(root, sessions);
     await this.ensureIgnored(root);
-    await writeFileAtomic(join(root, RUNS_DIR, SESSIONS_FILE), JSON.stringify(sessions, null, 2) + "\n");
+    await writeProjectFile(root, `${RUNS_DIR}/${SESSIONS_FILE}`, JSON.stringify(sessions, null, 2) + "\n");
   }
 
   setSessionMode(root: string, leadAgentId: string, mode: TeamMode | null): Promise<void> {
@@ -340,7 +340,7 @@ async function leadContext(paseo: PaseoApi, lead: { id: string; workspaceId: str
   // titled with the prompt first), the team follows it, as Reconnect would, unless another team has that title.
   if (own && leadFile && own.file === leadFile && key(own.team.orchestrator.workspace) !== key(title) && !teams.some((entry) => entry !== own && key(entry.team.orchestrator.workspace) === key(title))) {
     const moved = { ...own.team, orchestrator: { ...own.team.orchestrator, workspace: title } };
-    await writeFileAtomic(join(project.root, own.file), serializeTeam(moved));
+    await writeProjectFile(project.root, own.file, serializeTeam(moved));
     own = { ...own, team: moved };
   }
   if (!own) throw new Error(`No team file in .agents/teams/ runs in the workspace "${title}". Ask the user to apply the team again in the Agent team panel.`);

@@ -171,6 +171,7 @@ Planner and orchestrator agents start in the provider's reviewed auto mode when 
 ## Data and privacy
 
 - The plugin reads project, workspace, agent and provider metadata, the team files and the orchestrator's recent chat (to check that you confirmed a team brief). It may write the project's `.claude/settings.local.json`.
+- It writes and deletes only inside the project: a team file, run file or settings file that is a link leading outside the project, or that sits in a folder linking outside it, is refused with an error instead of written. Links that stay inside the project are followed.
 - Collaboration runs (briefs, task boards, board posts, members' final replies), briefs awaiting confirmation, per-session modes and formed roles are stored in the project under `.agents/runs/`, which the plugin keeps out of git with its own `.gitignore`. The newest 50 finished runs are kept.
 - Planning sends your goal to the selected provider, preferring Claude when it is ready. The planner is instructed to inspect the repository.
 - Orchestrator and member agents send their instructions, prompts, and any repository content or tool results they read to their configured providers, under those providers' normal behavior.

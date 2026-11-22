@@ -13,7 +13,7 @@ import { promptsFor } from "../shared/prompts";
 import { serializeTeam, type Team } from "../shared/team";
 import { teamFileFor, teamIn, workspaceClashes, workspacesOfOtherTeams } from "../shared/team-files";
 import { catalogFrom, validateTeam } from "../shared/validate";
-import { projectTeams, providerEntries, teamToolsEnabled, TOOLS_OFF_ERROR, writeFileAtomic, type PaseoApi } from "./common";
+import { projectTeams, providerEntries, teamToolsEnabled, TOOLS_OFF_ERROR, writeProjectFile, type PaseoApi } from "./common";
 import { allowTeamTools } from "./team";
 
 type CreateRequest = PluginHooks["agent.create.before"]["request"];
@@ -83,7 +83,7 @@ export async function prepareDraftLead(paseo: PaseoApi, request: OpenRequest, pr
     if (problems.length) throw new Error(problems.map((problem) => `${problem.target}: ${problem.message}`).join("\n"));
     // A New workspace starts out titled with the prompt and is renamed later, so a long title names the file after the preset.
     file = teamFileFor(title.length > 32 ? { ...team, orchestrator: { ...team.orchestrator, workspace: preset.name } } : team, teams, names);
-    await writeFileAtomic(join(root, file), serializeTeam(team));
+    await writeProjectFile(root, file, serializeTeam(team));
   }
   const permission = await allowTeamTools({ id: workspace.projectId, name: workspace.projectDisplayName, root }, claudeToolRules(team));
   if (!permission.ok) throw new Error(permission.errors.join("\n"));

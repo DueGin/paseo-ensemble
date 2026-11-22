@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -86,6 +86,46 @@ describe("reconnectTeam", () => {
     const result = await reconnectTeam({ projectId: "prj_1", file: teamFile, workspaceId: "wks_side" }, context());
     expect(result).toEqual({ ok: false, errors: [expect.stringContaining("belongs to another team")] });
     check();
+  });
+
+  describe("a team file that is a link out of the project", () => {
+    let elsewhere: string;
+    beforeEach(() => {
+      elsewhere = mkdtempSync(join(tmpdir(), "reconnect-elsewhere-"));
+    });
+    afterEach(() => {
+      rmSync(elsewhere, { recursive: true, force: true });
+    });
+
+    it("is not overwritten: Reconnect answers not ok and the outside file stays as it was", async () => {
+      const outside = join(elsewhere, "linked.json");
+      writeFileSync(outside, serializeTeam(team("linked")), "utf8");
+      symlinkSync(outside, join(root, TEAMS_DIR, "linked.json"));
+      const result = await reconnectTeam({ projectId: "prj_1", file: `${TEAMS_DIR}/linked.json`, workspaceId: "wks_renamed" }, context());
+      expect(result).toEqual({ ok: false, errors: [expect.stringContaining("leads outside the project")] });
+      expect(readFileSync(outside, "utf8")).toBe(serializeTeam(team("linked")));
+    });
+
+    it("stops the whole team: its files inside the project are not rewritten either", async () => {
+      const outside = join(elsewhere, "same.json");
+      writeFileSync(outside, serializeTeam(team("orchestrator")), "utf8");
+      symlinkSync(outside, join(root, TEAMS_DIR, "same.json"));
+      const check = unchanged();
+      const result = await reconnectTeam({ projectId: "prj_1", file: teamFile, workspaceId: "wks_renamed" }, context());
+      expect(result).toEqual({ ok: false, errors: [expect.stringContaining("leads outside the project")] });
+      check();
+      expect(readFileSync(outside, "utf8")).toBe(serializeTeam(team("orchestrator")));
+    });
+
+    it("is refused when the teams folder itself links out of the project", async () => {
+      rmSync(join(root, TEAMS_DIR), { recursive: true });
+      writeFileSync(join(elsewhere, "orchestrator.json"), serializeTeam(team("orchestrator")), "utf8");
+      symlinkSync(elsewhere, join(root, TEAMS_DIR));
+      rmSync(join(root, TEAM_FILE));
+      const result = await reconnectTeam({ projectId: "prj_1", file: teamFile, workspaceId: "wks_renamed" }, context());
+      expect(result).toEqual({ ok: false, errors: [expect.stringContaining("leads outside the project")] });
+      expect(readFileSync(join(elsewhere, "orchestrator.json"), "utf8")).toBe(serializeTeam(team("orchestrator")));
+    });
   });
 });
 

@@ -1,6 +1,6 @@
 import type { RpcInput, RpcOutput } from "@getpaseo/plugin";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
-import { readFile, unlink, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ensureWorkspaces, freeWorkspace, planWorkspaces, workspaceLabel } from "../shared/apply-plan";
 import { presetToTeam, taskWorkspaceTitle, type Preset } from "../shared/presets";
@@ -14,7 +14,7 @@ import type { teamSaveRpc, teamPresetStartRpc, teamApplyRpc, teamDeleteRpc, team
 import { checkTeam, serializeTeam, type Team } from "../shared/team";
 import { sameTeamFiles, teamFileFor, teamFileWorkspaces, teamIn, workspaceOwnerOf, workspaceClashes, workspacesOfOtherTeams } from "../shared/team-files";
 import { catalogFrom, agentModeOf, validateTeam, type ProviderEntry } from "../shared/validate";
-import { allProjects, projectOf, projectTeams, providerEntries, teamToolsEnabled, TOOLS_OFF_ERROR, writeFileAtomic, type PaseoApi, type Target } from "./common";
+import { allProjects, OutsideProjectError, projectFile, projectOf, projectTeams, providerEntries, removeProjectFile, teamToolsEnabled, TOOLS_OFF_ERROR, writeFileAtomic, writeProjectFile, type PaseoApi, type Target } from "./common";
 import { leadUnattended, UNATTENDED_LABEL } from "../shared/draft-lead";
 
 /** The workspace to start the planner in: the given one, else one of the project's, else a new "Team planner". */
@@ -76,7 +76,7 @@ export async function deleteTeam({ projectId, file }: RpcInput<typeof teamDelete
   const fileFailures: string[] = [];
   const files: string[] = [];
   for (const entry of own) {
-    try { await unlink(join(project.root, entry.file)); }
+    try { await removeProjectFile(project.root, entry.file); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") { fileFailures.push(`file ${entry.file}: ${String(error)}`); continue; }
     }
@@ -97,7 +97,15 @@ export async function reconnectTeam({ projectId, file, workspaceId }: RpcInput<t
   const key = (value: string) => value.trim().toLowerCase();
   const taken = workspacesOfOtherTeams(teams, own[0]!.team.orchestrator.workspace);
   if (taken.some((name) => key(name) === key(title))) return { ok: false, errors: [`Workspace "${title}" belongs to another team.`] };
-  for (const { file, team } of own) await writeFile(join(project.root, file), serializeTeam({ ...team, orchestrator: { ...team.orchestrator, workspace: title } }), "utf8");
+  // Every file is checked before any is written, so one that leads outside the project leaves the others as they were.
+  let paths: string[];
+  try {
+    paths = await Promise.all(own.map((entry) => projectFile(project.root, entry.file)));
+  } catch (error) {
+    if (error instanceof OutsideProjectError) return { ok: false, errors: [error.message] };
+    throw error;
+  }
+  for (const [index, { team }] of own.entries()) await writeFileAtomic(paths[index]!, serializeTeam({ ...team, orchestrator: { ...team.orchestrator, workspace: title } }));
   return { ok: true, files: own.map((entry) => entry.file) };
 }
 
@@ -267,7 +275,14 @@ async function archivePlanners(paseo: PaseoApi, targets: { agents: string[]; wor
 export async function allowTeamTools(project: ProjectRef, rules: readonly string[]): Promise<{ ok: true; file: string | null } | { ok: false; errors: string[] }> {
   if (!rules.length) return { ok: true, file: null };
   const file = join(project.root, CLAUDE_LOCAL_SETTINGS);
-  const text = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+  let path: string;
+  try {
+    path = await projectFile(project.root, CLAUDE_LOCAL_SETTINGS);
+  } catch (error) {
+    if (error instanceof OutsideProjectError) return { ok: false, errors: [error.message] };
+    throw error;
+  }
+  const text = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return "{}";
     throw error;
   });
@@ -281,7 +296,7 @@ export async function allowTeamTools(project: ProjectRef, rules: readonly string
   let next = settings as Record<string, unknown>;
   for (const rule of rules) next = withAllowRule(next, rule) ?? next;
   if (next === settings) return { ok: true, file: null };
-  await writeFileAtomic(file, JSON.stringify(next, null, 2) + "\n");
+  await writeFileAtomic(path, JSON.stringify(next, null, 2) + "\n");
   return { ok: true, file };
 }
 
@@ -310,7 +325,7 @@ export async function restartOrchestrator(target: RpcInput<typeof teamRestartOrc
   if ((await teamToolsEnabled(paseo)) === false) return { ok: false, errors: [TOOLS_OFF_ERROR] };
   // A team file without a language gets the app's, so the new lead works in it and later runs keep it.
   const team = own.team.language ? own.team : { ...own.team, language: languageFromLocale(target.locale) };
-  if (!own.team.language) await writeFileAtomic(join(project.root, file), serializeTeam(team));
+  if (!own.team.language) await writeProjectFile(project.root, file, serializeTeam(team));
   const providers = await providerEntries(paseo);
   const problems = validateTeam(team, catalogFrom(providers));
   if (problems.length) return { ok: false, errors: problems.map((problem) => `${problem.target}: ${problem.message}`) };
@@ -343,7 +358,7 @@ export async function saveTeam({ team: input, ...target }: RpcInput<typeof teamS
   if (clashes.length) return { ok: false, errors: clashes.map((problem) => `${problem.target}: ${problem.message}`) };
   const relative = teamFileFor(team, teams, names);
   const file = join(project.root, relative);
-  await writeFileAtomic(file, serializeTeam(team));
+  await writeProjectFile(project.root, relative, serializeTeam(team));
   return { ok: true, file };
 }
 
@@ -376,7 +391,7 @@ export async function applyTeam({ team: input, locale, request, mode: _mode, una
   if (!permission.ok) return { ok: false, errors: permission.errors };
   const relative = teamFileFor(team, teams, names);
   const file = join(project.root, relative);
-  await writeFileAtomic(file, serializeTeam(team));
+  await writeProjectFile(project.root, relative, serializeTeam(team));
 
   const { entries } = await paseo.workspaces.list();
   const existing = entries.filter((workspace) => workspace.projectId === project.id && !workspace.archivingAt);
